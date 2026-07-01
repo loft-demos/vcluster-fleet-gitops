@@ -1,4 +1,2 @@
-__pycache__/
-*.py[cod]
-test_*.py
+*_test.go
 README.md

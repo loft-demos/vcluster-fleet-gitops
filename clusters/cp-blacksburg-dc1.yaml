@@ -27,3 +27,6 @@ metadata:
     fleet.lab.kurtmadel.com/baseline: "true"
 spec:
   displayName: "CP Blacksburg DC1"
+  # fleet-binding-controller only reconciles Clusters with argoCD.enabled: true.
+  argoCD:
+    enabled: true

@@ -1,10 +1,13 @@
-FROM python:3.12-alpine@sha256:6d43704baacd1bfbe7c295d7f13079d5d8104ed33568873133f8fc69980419df
+FROM golang:1.23-alpine@sha256:383395b794dffa5b53012a212365d40c8e37109a626ca30d6151c8348d380b5f AS builder
 
-ENV PYTHONDONTWRITEBYTECODE=1
-ENV PYTHONUNBUFFERED=1
+WORKDIR /src
+COPY go.mod ./
+COPY *.go ./
+RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/fleet-binding-controller .
 
-WORKDIR /app
-COPY controller.py /app/controller.py
+FROM gcr.io/distroless/static-debian12:nonroot@sha256:d093aa3e30dbadd3efe1310db061a14da60299baff8450a17fe0ccc514a16639
+
+COPY --from=builder /out/fleet-binding-controller /fleet-binding-controller
 
 USER 65532:65532
-ENTRYPOINT ["python", "/app/controller.py"]
+ENTRYPOINT ["/fleet-binding-controller"]

@@ -28,3 +28,6 @@ metadata:
     fleet.lab.kurtmadel.com/baseline: "true"
 spec:
   displayName: "vCP Management Cluster"
+  # fleet-binding-controller only reconciles Clusters with argoCD.enabled: true.
+  argoCD:
+    enabled: true
