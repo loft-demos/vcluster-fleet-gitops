@@ -169,12 +169,25 @@ resources in the platform project namespace. Adding or changing matching
 `Cluster` metadata takes effect on the next reconcile without changing the
 binding chart.
 
+A `Cluster` is only reconciled when it matches the label selector below AND
+has `spec.argoCD.enabled: true`. Clusters missing that field, or with it set
+to `false`, are skipped entirely, and any bindings the controller previously
+generated for them are pruned on the next reconcile.
+
 Default selector:
 
 ```yaml
 metadata:
   labels:
     fleet.lab.kurtmadel.com/baseline: "true"
+```
+
+Required spec gate:
+
+```yaml
+spec:
+  argoCD:
+    enabled: true
 ```
 
 Profile selection:
