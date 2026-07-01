@@ -1,0 +1,20 @@
+{{- if .Values.staticBindings.enabled }}
+{{- $ns := .Values.projectNamespace -}}
+{{- range $cluster := .Values.staticBindings.clusters }}
+{{- range $app := $cluster.apps }}
+---
+# {{ $app }} -> {{ $cluster.name }}
+apiVersion: management.loft.sh/v1
+kind: ArgoCDApplication
+metadata:
+  name: {{ printf "%s-%s" $app $cluster.name | trunc 63 | trimSuffix "-" }}
+  namespace: {{ $ns }}
+spec:
+  destination:
+    cluster:
+      name: {{ $cluster.name }}
+  templateRef:
+    name: {{ $app }}
+{{- end }}
+{{- end }}
+{{- end }}

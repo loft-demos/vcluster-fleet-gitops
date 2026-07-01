@@ -1,0 +1,53 @@
+{{- if .Values.controller.enabled }}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: fleet-binding-controller
+  namespace: {{ .Values.controller.namespace }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: fleet-binding-controller-cluster-read
+rules:
+  - apiGroups: ["management.loft.sh"]
+    resources: ["clusters"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: fleet-binding-controller-cluster-read
+subjects:
+  - kind: ServiceAccount
+    name: fleet-binding-controller
+    namespace: {{ .Values.controller.namespace }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: fleet-binding-controller-cluster-read
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: fleet-binding-controller-argocdapplications
+  namespace: {{ .Values.projectNamespace }}
+rules:
+  - apiGroups: ["management.loft.sh"]
+    resources: ["argocdapplications"]
+    verbs: ["get", "list", "watch", "create", "patch", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: fleet-binding-controller-argocdapplications
+  namespace: {{ .Values.projectNamespace }}
+subjects:
+  - kind: ServiceAccount
+    name: fleet-binding-controller
+    namespace: {{ .Values.controller.namespace }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: fleet-binding-controller-argocdapplications
+{{- end }}

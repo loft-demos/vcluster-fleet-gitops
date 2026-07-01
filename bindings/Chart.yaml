@@ -1,0 +1,8 @@
+apiVersion: v2
+name: fleet-bindings
+description: >-
+  Installs the fleet binding controller, which reconciles vCP ArgoCDApplication
+  bindings from Cluster labels and annotation-selected app profiles.
+type: application
+version: 0.2.0
+appVersion: "0.1.0"

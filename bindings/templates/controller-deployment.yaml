@@ -1,0 +1,79 @@
+{{- if .Values.controller.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: fleet-binding-controller
+  namespace: {{ .Values.controller.namespace }}
+  labels:
+    app.kubernetes.io/name: fleet-binding-controller
+spec:
+  replicas: {{ .Values.controller.replicaCount }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: fleet-binding-controller
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: fleet-binding-controller
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/controller-configmap.yaml") . | sha256sum }}
+        {{- with .Values.controller.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      serviceAccountName: fleet-binding-controller
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+      containers:
+        - name: controller
+          image: "{{ .Values.controller.image.repository }}:{{ .Values.controller.image.tag }}"
+          imagePullPolicy: {{ .Values.controller.image.pullPolicy }}
+          env:
+            - name: PROJECT_NAMESPACE
+              value: {{ .Values.projectNamespace | quote }}
+            - name: FLEET_BINDING_PROFILES_PATH
+              value: /config/profiles.json
+            - name: FLEET_BINDING_CLUSTER_SELECTOR_PATH
+              value: /config/cluster-selector.json
+            - name: FLEET_BINDING_DEFAULT_PROFILES
+              value: {{ join "," .Values.controller.defaultProfiles | quote }}
+            - name: FLEET_BINDING_PROFILE_ANNOTATION
+              value: {{ .Values.controller.profileAnnotation | quote }}
+            - name: FLEET_BINDING_EXTRA_APPS_ANNOTATION
+              value: {{ .Values.controller.extraAppsAnnotation | quote }}
+            - name: FLEET_BINDING_SKIP_APPS_ANNOTATION
+              value: {{ .Values.controller.skipAppsAnnotation | quote }}
+            - name: RECONCILE_INTERVAL
+              value: {{ .Values.controller.reconcileInterval | quote }}
+            - name: LOG_LEVEL
+              value: {{ .Values.controller.logLevel | quote }}
+          volumeMounts:
+            - name: config
+              mountPath: /config
+              readOnly: true
+          resources:
+            {{- toYaml .Values.controller.resources | nindent 12 }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+      volumes:
+        - name: config
+          configMap:
+            name: fleet-binding-controller-config
+      {{- with .Values.controller.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.controller.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.controller.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- end }}

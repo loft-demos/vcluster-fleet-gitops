@@ -1,0 +1,12 @@
+{{- if .Values.controller.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: fleet-binding-controller-config
+  namespace: {{ .Values.controller.namespace }}
+data:
+  profiles.json: |
+    {{- .Values.profiles | toPrettyJson | nindent 4 }}
+  cluster-selector.json: |
+    {{- .Values.controller.clusterSelector | toPrettyJson | nindent 4 }}
+{{- end }}

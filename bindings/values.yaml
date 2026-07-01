@@ -1,0 +1,89 @@
+# The vCluster Platform project namespace the ArgoCDApplication objects live in.
+projectNamespace: p-platform
+
+# Named app sets. A selected Cluster chooses one or more profiles with:
+#
+#   fleet.lab.kurtmadel.com/profiles: control-plane-baseline,gpu-nvidia-baseline
+#
+# The values here are templateRef names. Per-cluster values still live on the
+# Cluster's fleet.lab.kurtmadel.com/* annotations and are consumed by the
+# ArgoCDApplicationTemplates.
+profiles:
+  control-plane-baseline:
+    apps:
+      - cert-manager
+      - metrics-server
+      - metallb
+      - metallb-config
+      - envoy-gateway
+      - envoy-gateway-config
+      - cert-config
+
+  # Platform management cluster profile. It gets the control-plane baseline plus
+  # the watcher that patches Argo CD application health and wakes sleeping vClusters.
+  vcp-management-cluster-baseline:
+    apps:
+      - cert-manager
+      - metrics-server
+      - metallb
+      - metallb-config
+      - envoy-gateway
+      - envoy-gateway-config
+      - cert-config
+      - vcluster-gitops-watcher
+
+  # Reserved GPU profiles. Add the matching ArgoCDApplicationTemplates before
+  # assigning these profiles to a Cluster.
+  gpu-nvidia-baseline:
+    apps:
+      - nvidia-gpu-operator
+      - nvidia-dra-driver-gpu
+
+  gpu-amd-baseline:
+    apps:
+      - amd-gpu-operator
+      - amd-dra-driver
+
+controller:
+  enabled: true
+  namespace: vcluster-platform
+  replicaCount: 1
+
+  image:
+    repository: ghcr.io/loft-demos/vcluster-fleet-gitops/fleet-binding-controller
+    tag: "0.1.0"
+    pullPolicy: IfNotPresent
+
+  reconcileInterval: 30s
+  logLevel: INFO
+
+  clusterSelector:
+    matchLabels:
+      fleet.lab.kurtmadel.com/baseline: "true"
+
+  # Used when a selected Cluster does not set fleet.lab.kurtmadel.com/profiles.
+  defaultProfiles:
+    - control-plane-baseline
+
+  profileAnnotation: fleet.lab.kurtmadel.com/profiles
+  extraAppsAnnotation: fleet.lab.kurtmadel.com/extra-apps
+  skipAppsAnnotation: fleet.lab.kurtmadel.com/skip-apps
+
+  podAnnotations: {}
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+  resources:
+    requests:
+      cpu: 10m
+      memory: 32Mi
+    limits:
+      cpu: 100m
+      memory: 128Mi
+
+# Emergency/manual escape hatch. Leave disabled for normal operation; dynamic
+# bindings should come from Cluster metadata and the controller above.
+staticBindings:
+  enabled: false
+  clusters: []

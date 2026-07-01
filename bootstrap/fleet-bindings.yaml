@@ -1,0 +1,24 @@
+# fleet-bindings.yaml - Layer 1: renders the per-cluster ArgoCDApplication
+# bindings from the cluster list and applies them to the vCP cluster. Helm app.
+# Runs after clusters + baseline templates exist (default wave 0 > -1).
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: fleet-bindings
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://forgejo.apps.lab.kurtmadel.com/vcluster-demos/platform-config.git
+    targetRevision: main
+    path: bindings
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: vcluster-platform
+  syncPolicy:
+    automated:
+      # Generated ArgoCDApplication bindings are owned/pruned by the
+      # fleet-binding-controller. Keeping Argo CD prune off here also lets the
+      # controller adopt the previous Helm-rendered bindings during migration.
+      prune: false
+      selfHeal: true
