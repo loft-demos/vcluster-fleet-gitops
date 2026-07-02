@@ -45,7 +45,7 @@ Install or upgrade:
 ```sh
 helm upgrade --install fleet-bindings \
   oci://ghcr.io/loft-demos/vcluster-fleet-gitops/fleet-bindings \
-  --version 0.1.0 \
+  --version 0.3.0 \
   --namespace vcluster-platform \
   --create-namespace
 ```
@@ -55,9 +55,9 @@ Override values inline, or with `-f my-values.yaml`:
 ```sh
 helm upgrade --install fleet-bindings \
   oci://ghcr.io/loft-demos/vcluster-fleet-gitops/fleet-bindings \
-  --version 0.1.0 \
+  --version 0.3.0 \
   --namespace vcluster-platform \
-  --set controller.image.tag=0.1.0 \
+  --set controller.image.tag=0.2.0 \
   --set controller.reconcileInterval=15s
 ```
 

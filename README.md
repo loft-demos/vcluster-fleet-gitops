@@ -402,7 +402,8 @@ and external DNS records are cleaned up:
 
 1. In the Cluster manifest, remove the
    `fleet.lab.kurtmadel.com/baseline: "true"` label (or set it to `"false"`),
-   then commit and push. Do not delete the Cluster manifest yet.
+   then commit and push. Do not delete the Cluster manifest or the
+   `external-dns/godaddy-api-credentials` Secret yet.
 2. Wait for the fleet binding controller to remove every generated application.
    It prunes the highest dependency depth first, so `external-dns` is removed
    before the Gateway and its GoDaddy `PostDelete` cleanup hook can run.
@@ -470,7 +471,7 @@ that setting lets it adopt the old Helm-rendered bindings during migration.
    ```sh
    helm upgrade --install fleet-bindings \
      oci://ghcr.io/loft-demos/vcluster-fleet-gitops/fleet-bindings \
-     --version 0.2.1 \
+     --version 0.3.0 \
      --namespace vcluster-platform \
      --create-namespace \
      -f bindings/values.yaml
