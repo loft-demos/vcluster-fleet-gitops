@@ -28,17 +28,24 @@ No manual `helm install` is needed for a normal fleet deployment — push to
 
 ## Manual install (local testing, or standalone use)
 
-Validate before installing:
+Inspect and render the published chart before installing:
 
 ```sh
-helm lint .
-helm template fleet-bindings . --namespace vcluster-platform
+helm show chart \
+  oci://ghcr.io/loft-demos/vcluster-fleet-gitops/fleet-bindings \
+  --version 0.1.0
+helm template fleet-bindings \
+  oci://ghcr.io/loft-demos/vcluster-fleet-gitops/fleet-bindings \
+  --version 0.1.0 \
+  --namespace vcluster-platform
 ```
 
 Install or upgrade:
 
 ```sh
-helm upgrade --install fleet-bindings . \
+helm upgrade --install fleet-bindings \
+  oci://ghcr.io/loft-demos/vcluster-fleet-gitops/fleet-bindings \
+  --version 0.1.0 \
   --namespace vcluster-platform \
   --create-namespace
 ```
@@ -46,9 +53,11 @@ helm upgrade --install fleet-bindings . \
 Override values inline, or with `-f my-values.yaml`:
 
 ```sh
-helm upgrade --install fleet-bindings . \
+helm upgrade --install fleet-bindings \
+  oci://ghcr.io/loft-demos/vcluster-fleet-gitops/fleet-bindings \
+  --version 0.1.0 \
   --namespace vcluster-platform \
-  --set controller.image.tag=0.2.0 \
+  --set controller.image.tag=0.1.0 \
   --set controller.reconcileInterval=15s
 ```
 
