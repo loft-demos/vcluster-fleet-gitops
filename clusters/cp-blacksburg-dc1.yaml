@@ -20,6 +20,7 @@ metadata:
     fleet.lab.kurtmadel.com/metallb-pool: "192.168.51.0/24"
     fleet.lab.kurtmadel.com/gateway-lb-ip: "192.168.51.10"
     fleet.lab.kurtmadel.com/base-domain: "dc1.lab.kurtmadel.com"
+    fleet.lab.kurtmadel.com/dns-zone: "kurtmadel.com"
     fleet.lab.kurtmadel.com/cluster-issuer: "letsencrypt-prod"
     fleet.lab.kurtmadel.com/profiles: "control-plane-baseline"
     # no platform-hostname: agent control plane clusters do not host the platform

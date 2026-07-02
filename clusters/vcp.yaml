@@ -20,6 +20,7 @@ metadata:
     fleet.lab.kurtmadel.com/metallb-pool: "192.168.50.0/24"
     fleet.lab.kurtmadel.com/gateway-lb-ip: "192.168.50.10"
     fleet.lab.kurtmadel.com/base-domain: "lab.kurtmadel.com"
+    fleet.lab.kurtmadel.com/dns-zone: "kurtmadel.com"
     fleet.lab.kurtmadel.com/cluster-issuer: "letsencrypt-prod"
     # Management cluster only: adds the vcp-tls passthrough listener.
     fleet.lab.kurtmadel.com/platform-hostname: "vcp.lab.kurtmadel.com"

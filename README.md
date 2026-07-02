@@ -102,6 +102,7 @@ vcluster-fleet-gitops/
     charts/envoy-gateway-config/  #   wrapper: edge from base domain + LB IP + platform host
     charts/cert-config/           #   wrapper: wildcard Certificates from base domain + issuer
     charts/godaddy-clusterissuer/ #   wrapper: per-cluster production ClusterIssuer
+    charts/external-dns/          #   wrapper: ExternalDNS + GoDaddy PostDelete cleanup
     manifests/vcluster-gitops-watcher/   # centralized watcher manifests
   bindings/                       # chart: controller + FleetProfile CRD/resources
     README.md                     #   deploy/upgrade/uninstall instructions
@@ -300,10 +301,11 @@ wrapper chart:
   Needs cert-manager CRDs + a DNS01 issuer (wildcards); Argo CD retries until
   they exist.
 - **`external-dns`** publishes DNS records to GoDaddy using external-dns's
-  native `godaddy` provider (no webhook sidecar). `domainFilters` and
-  `txtOwnerId` are scoped to `fleet.lab.kurtmadel.com/base-domain`, so one
-  cluster's instance can never touch another cluster's records even though
-  they share a GoDaddy account. GoDaddy credentials are **not** stored in git;
+  native `godaddy` provider (no webhook sidecar). `domainFilters` uses the
+  registered parent zone from `fleet.lab.kurtmadel.com/dns-zone`, while the
+  cluster-specific `txtOwnerId` uses `fleet.lab.kurtmadel.com/base-domain` so
+  instances sharing the zone retain separate record ownership. GoDaddy
+  credentials are **not** stored in git;
   create them out of band before this app can sync:
 
   ```sh
@@ -322,6 +324,12 @@ wrapper chart:
   stays `false`, so anyone deploying it standalone (outside this template)
   gets the safe default.
 
+  The wrapper chart also includes an Argo CD `PostDelete` hook. Before an
+  ExternalDNS application finishes deleting, the hook finds TXT registry
+  records owned by that cluster's `txtOwnerId` and removes their corresponding
+  A/AAAA/CNAME and TXT records from GoDaddy. A cleanup failure intentionally
+  leaves the application deletion pending instead of silently orphaning DNS.
+
 The `Cluster` annotations are the fleet parameter sheet:
 
 | Annotation | Used by | Example |
@@ -332,6 +340,7 @@ The `Cluster` annotations are the fleet parameter sheet:
 | `fleet.lab.kurtmadel.com/metallb-pool` | `metallb-config` | `192.168.51.0/24` |
 | `fleet.lab.kurtmadel.com/gateway-lb-ip` | `envoy-gateway-config` | `192.168.51.10` |
 | `fleet.lab.kurtmadel.com/base-domain` | `envoy-gateway-config`, `cert-config`, `external-dns` | `dc1.lab.kurtmadel.com` |
+| `fleet.lab.kurtmadel.com/dns-zone` | `external-dns` | `kurtmadel.com` |
 | `fleet.lab.kurtmadel.com/cluster-issuer` | `cert-config` | `letsencrypt-prod` |
 | `fleet.lab.kurtmadel.com/platform-hostname` | `envoy-gateway-config` (Platform management cluster only) | `vcp.lab.kurtmadel.com` |
 
@@ -385,6 +394,40 @@ Envoy Gateway that exposes Argo CD and the platform, and the cert-manager their
 TLS depends on) are seeded in the same IaC step that installs Argo CD, then
 adopted and self-healed by their bindings. Argo CD cannot install from zero the
 components it needs to reach the Platform management cluster.
+
+### Removing a cluster from the fleet
+
+Use a two-commit teardown so the target remains reachable while its applications
+and external DNS records are cleaned up:
+
+1. In the Cluster manifest, remove the
+   `fleet.lab.kurtmadel.com/baseline: "true"` label (or set it to `"false"`),
+   then commit and push. Do not delete the Cluster manifest yet.
+2. Wait for the fleet binding controller to remove every generated application.
+   It prunes the highest dependency depth first, so `external-dns` is removed
+   before the Gateway and its GoDaddy `PostDelete` cleanup hook can run.
+
+   ```sh
+   kubectl -n p-platform get argocdapplications \
+     -l fleet.lab.kurtmadel.com/cluster=<cluster-name> --watch
+   ```
+
+3. Confirm that no generated applications or cluster-owned wildcard records
+   remain:
+
+   ```sh
+   kubectl -n p-platform get argocdapplications \
+     -l fleet.lab.kurtmadel.com/cluster=<cluster-name>
+   dig +short '*.<base-domain>' A
+   dig +short '*.apps.<base-domain>' A
+   ```
+
+4. Delete the Cluster manifest in a second commit and push it. Only after the
+   `fleet-clusters` application has removed the registration should you destroy
+   the target cluster or vCluster.
+
+Deleting the Cluster registration or target cluster first can make its API
+unreachable before Argo CD runs the DNS cleanup hook.
 
 ## Sync ordering
 
