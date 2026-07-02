@@ -78,7 +78,7 @@ controller:
 
   image:
     repository: ghcr.io/loft-demos/vcluster-fleet-gitops/fleet-binding-controller
-    tag: "0.3.0"
+    tag: "0.1.0"
     # Optional digest (sha256:...) to pin the image beyond the tag. Takes
     # precedence over the tag when set: image is "repository:tag@digest".
     digest: ""

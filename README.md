@@ -409,10 +409,22 @@ that setting lets it adopt the old Helm-rendered bindings during migration.
      `fleet.lab.kurtmadel.com/*` annotations, the
      `fleet.lab.kurtmadel.com/baseline=true` label, and a
      `fleet.lab.kurtmadel.com/profiles` annotation.
-   - Build and publish the fleet binding controller image from
-     [`controllers/fleet-binding-controller`](controllers/fleet-binding-controller),
-     then set `controller.image.repository` and `controller.image.tag`.
-3. Install or upgrade Argo CD with the seeded values:
+   - Override `controller.image.repository` or `controller.image.tag` only when
+     you do not want to use the controller image referenced by the chart
+     defaults.
+3. Install or upgrade the published fleet bindings chart with this repo's
+   profile configuration:
+
+   ```sh
+   helm upgrade --install fleet-bindings \
+     oci://ghcr.io/loft-demos/vcluster-fleet-gitops/fleet-bindings \
+     --version 0.3.0 \
+     --namespace vcluster-platform \
+     --create-namespace \
+     -f bindings/values.yaml
+   ```
+
+4. Install or upgrade Argo CD with the seeded values:
 
    ```sh
    helm upgrade --install argocd argo/argo-cd \
@@ -420,7 +432,7 @@ that setting lets it adopt the old Helm-rendered bindings during migration.
      -f ../kpi-vcluster/manifests/argocd/argocd-values-workers.yaml
    ```
 
-4. Watch it converge:
+5. Watch it converge:
 
    ```sh
    kubectl -n argocd get applications
