@@ -1,5 +1,11 @@
 # vcluster-fleet-gitops
 
+> [!WARNING]
+> This project was created for demonstration environments and is not intended
+> for production or other non-demo use. It is provided as-is and without
+> warranties. Use it at your own risk; ongoing maintenance, compatibility,
+> security updates, and support are not guaranteed.
+
 GitOps fleet management for vCluster Platform (vCP), covering the Platform
 management cluster, connected control-plane clusters, and tenant clusters.
 Git is the source of truth; vCluster Platform is the distributor. This
