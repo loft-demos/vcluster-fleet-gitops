@@ -88,6 +88,8 @@ vcluster-fleet-gitops/
     vcp.yaml
   baseline/                       # one ArgoCDApplicationTemplate per shared app
     cert-manager.yaml             #   uniform
+    godaddy-webhook.yaml          #   uniform DNS-01 solver (after cert-manager)
+    godaddy-clusterissuer.yaml     #   per-cluster Let's Encrypt issuer
     metrics-server.yaml           #   uniform
     metallb.yaml                  #   uniform (controller)
     metallb-config.yaml           #   per-cluster (pool from Cluster annotation)
@@ -99,6 +101,7 @@ vcluster-fleet-gitops/
     charts/metallb-config/        #   wrapper: IPAddressPool from .Values.addressPool
     charts/envoy-gateway-config/  #   wrapper: edge from base domain + LB IP + platform host
     charts/cert-config/           #   wrapper: wildcard Certificates from base domain + issuer
+    charts/godaddy-clusterissuer/ #   wrapper: per-cluster production ClusterIssuer
     manifests/vcluster-gitops-watcher/   # centralized watcher manifests
   bindings/                       # chart: controller + FleetProfile CRD/resources
     README.md                     #   deploy/upgrade/uninstall instructions
@@ -284,6 +287,12 @@ wrapper chart:
   passthrough listener is added only when
   `fleet.lab.kurtmadel.com/platform-hostname` is present, so the same template
   fits the management and connected control-plane clusters.
+- **`godaddy-webhook`** installs the GoDaddy DNS-01 solver after cert-manager.
+  Set `fleet.lab.kurtmadel.com/godaddy-webhook-node` on a Cluster to pin it to a
+  specific node; otherwise Kubernetes schedules it normally.
+- **`godaddy-clusterissuer`** creates the Let's Encrypt production
+  `ClusterIssuer` after the webhook is healthy, using the target Cluster's
+  base-domain and cluster-issuer annotations.
 - **`cert-config`** closes the TLS loop: it issues the wildcard secrets the edge
   listeners reference (`<base-dashed>-tls`, `apps-<base-dashed>-tls`) via
   cert-manager, using `fleet.lab.kurtmadel.com/cluster-issuer`. It deploys into

@@ -14,6 +14,12 @@ profiles:
   control-plane-baseline:
     applications:
       - name: cert-manager
+      - name: godaddy-webhook
+        dependsOn:
+          - cert-manager
+      - name: godaddy-clusterissuer
+        dependsOn:
+          - godaddy-webhook
       - name: metrics-server
       - name: metallb
       - name: metallb-config
@@ -22,7 +28,7 @@ profiles:
       - name: envoy-gateway
       - name: cert-config
         dependsOn:
-          - cert-manager
+          - godaddy-clusterissuer
       - name: envoy-gateway-config
         dependsOn:
           - envoy-gateway
@@ -37,6 +43,12 @@ profiles:
   vcp-management-cluster-baseline:
     applications:
       - name: cert-manager
+      - name: godaddy-webhook
+        dependsOn:
+          - cert-manager
+      - name: godaddy-clusterissuer
+        dependsOn:
+          - godaddy-webhook
       - name: metrics-server
       - name: metallb
       - name: metallb-config
@@ -45,7 +57,7 @@ profiles:
       - name: envoy-gateway
       - name: cert-config
         dependsOn:
-          - cert-manager
+          - godaddy-clusterissuer
       - name: envoy-gateway-config
         dependsOn:
           - envoy-gateway

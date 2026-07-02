@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"net/http"
 	"strings"
@@ -105,5 +106,69 @@ func TestListArgoCDApplicationsReadsUnderlyingHealthAndSyncStatus(t *testing.T) 
 	}
 	if len(applications) != 1 || !applicationReady(applications[0]) {
 		t.Fatalf("application status was not ready: %#v", applications)
+	}
+}
+
+func TestPatchArgoCDApplicationOmitsTypeMetadata(t *testing.T) {
+	client := &KubeClient{
+		baseURL: "https://kubernetes.example",
+		token:   "test-token",
+		httpClient: testHTTPClient(t, `{}`, func(request *http.Request) {
+			if request.Method != http.MethodPatch {
+				t.Errorf("method %q, want PATCH", request.Method)
+			}
+			wantPath := "/apis/management.loft.sh/v1/namespaces/p-platform/argocdapplications/external-dns-edge"
+			if request.URL.Path != wantPath {
+				t.Errorf("path %q, want %q", request.URL.Path, wantPath)
+			}
+			if got := request.Header.Get("Content-Type"); got != "application/merge-patch+json" {
+				t.Errorf("Content-Type %q, want application/merge-patch+json", got)
+			}
+
+			var patch map[string]interface{}
+			if err := json.NewDecoder(request.Body).Decode(&patch); err != nil {
+				t.Fatalf("decode patch: %v", err)
+			}
+			for _, field := range []string{"apiVersion", "kind", "status"} {
+				if _, found := patch[field]; found {
+					t.Errorf("patch unexpectedly contains %q: %#v", field, patch[field])
+				}
+			}
+			if _, found := patch["metadata"]; !found {
+				t.Errorf("patch is missing metadata: %#v", patch)
+			}
+			if _, found := patch["spec"]; !found {
+				t.Errorf("patch is missing spec: %#v", patch)
+			}
+		}),
+	}
+
+	application := Application{
+		APIVersion: "management.loft.sh/v1",
+		Kind:       "ArgoCDApplication",
+		Metadata: ApplicationMeta{
+			Name:      "external-dns-edge",
+			Namespace: "p-platform",
+			Labels: map[string]string{
+				generatedByLabel: managedBy,
+			},
+			Annotations: map[string]string{
+				dependsOnAnnotation: "envoy-gateway-config",
+			},
+		},
+		Spec: ApplicationSpec{
+			Destination: Destination{Cluster: ClusterRef{Name: "edge"}},
+			TemplateRef: TemplateRef{Name: "external-dns"},
+		},
+		Status: &ApplicationStatus{},
+	}
+
+	if err := client.PatchArgoCDApplication(
+		context.Background(),
+		"p-platform",
+		"external-dns-edge",
+		application,
+	); err != nil {
+		t.Fatalf("patch ArgoCDApplication: %v", err)
 	}
 }

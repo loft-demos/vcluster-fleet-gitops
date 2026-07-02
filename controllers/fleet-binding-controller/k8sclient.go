@@ -150,7 +150,22 @@ func (c *KubeClient) CreateArgoCDApplication(ctx context.Context, namespace stri
 
 func (c *KubeClient) PatchArgoCDApplication(ctx context.Context, namespace, name string, application Application) error {
 	path := fmt.Sprintf("/apis/%s/%s/namespaces/%s/%s/%s", apiGroup, apiVersion, url.PathEscape(namespace), argoCDApplicationsResource, url.PathEscape(name))
-	return c.request(ctx, http.MethodPatch, path, application, "application/merge-patch+json", nil)
+	// Do not include apiVersion or kind in a merge patch. Platform serves this
+	// resource through management.loft.sh/v1 but stores it as storage.loft.sh/v1;
+	// sending the served apiVersion in the patch body fails validation.
+	patch := struct {
+		Metadata struct {
+			Labels      map[string]string `json:"labels"`
+			Annotations map[string]string `json:"annotations"`
+		} `json:"metadata"`
+		Spec ApplicationSpec `json:"spec"`
+	}{
+		Spec: application.Spec,
+	}
+	patch.Metadata.Labels = application.Metadata.Labels
+	patch.Metadata.Annotations = application.Metadata.Annotations
+
+	return c.request(ctx, http.MethodPatch, path, patch, "application/merge-patch+json", nil)
 }
 
 func (c *KubeClient) DeleteArgoCDApplication(ctx context.Context, namespace, name string) error {
