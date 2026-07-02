@@ -4,5 +4,12 @@ description: >-
   Installs the fleet binding controller, which reconciles vCP ArgoCDApplication
   bindings from Cluster labels and annotation-selected app profiles.
 type: application
-version: 0.2.0
-appVersion: "0.1.0"
+version: 0.3.0
+appVersion: "0.3.0"
+keywords:
+  - vcluster-platform
+  - argocd
+  - fleet-management
+sources:
+  - https://github.com/loft-demos/vcluster-fleet-gitops/tree/main/bindings
+  - https://github.com/loft-demos/vcluster-fleet-gitops/tree/main/controllers/fleet-binding-controller

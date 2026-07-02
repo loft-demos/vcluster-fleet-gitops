@@ -1,7 +1,9 @@
 package main
 
 import (
+	"fmt"
 	"regexp"
+	"strconv"
 	"strings"
 )
 
@@ -10,12 +12,17 @@ const (
 	apiVersion                 = "v1"
 	clustersResource           = "clusters"
 	argoCDApplicationsResource = "argocdapplications"
+	fleetAPIGroup              = "fleet.lab.kurtmadel.com"
+	fleetAPIVersion            = "v1alpha1"
+	fleetProfilesResource      = "fleetprofiles"
 	managedBy                  = "fleet-binding-controller"
 
-	generatedByLabel   = "fleet.lab.kurtmadel.com/generated-by"
-	clusterLabel       = "fleet.lab.kurtmadel.com/cluster"
-	templateLabel      = "fleet.lab.kurtmadel.com/template"
-	profilesAnnotation = "fleet.lab.kurtmadel.com/profiles"
+	generatedByLabel          = "fleet.lab.kurtmadel.com/generated-by"
+	clusterLabel              = "fleet.lab.kurtmadel.com/cluster"
+	templateLabel             = "fleet.lab.kurtmadel.com/template"
+	profilesAnnotation        = "fleet.lab.kurtmadel.com/profiles"
+	dependsOnAnnotation       = "fleet.lab.kurtmadel.com/depends-on"
+	dependencyDepthAnnotation = "fleet.lab.kurtmadel.com/dependency-depth"
 )
 
 func parseCSV(value string) []string {
@@ -80,76 +87,228 @@ func orderedUnique(items []string) []string {
 	return result
 }
 
+type resolvedApplication struct {
+	Name      string
+	DependsOn []string
+	Depth     int
+}
+
+func indexFleetProfiles(profiles []FleetProfile) map[string]FleetProfile {
+	index := make(map[string]FleetProfile, len(profiles))
+	for _, profile := range profiles {
+		if profile.Metadata.Name != "" {
+			index[profile.Metadata.Name] = profile
+		}
+	}
+	return index
+}
+
+// resolveApplications combines the selected FleetProfiles, extra apps, and
+// skipped apps into a validated dependency graph. Applications retain their
+// first-seen ordering, while dependencies from duplicate entries are merged.
+func resolveApplications(
+	profileNames []string,
+	profiles map[string]FleetProfile,
+	extraApps []string,
+	skipApps []string,
+) ([]resolvedApplication, error) {
+	applications := map[string]*resolvedApplication{}
+	var order []string
+
+	add := func(application FleetProfileApplication) {
+		current, ok := applications[application.Name]
+		if !ok {
+			current = &resolvedApplication{Name: application.Name}
+			applications[application.Name] = current
+			order = append(order, application.Name)
+		}
+		current.DependsOn = orderedUnique(append(current.DependsOn, application.DependsOn...))
+	}
+
+	for _, profileName := range profileNames {
+		profile, ok := profiles[profileName]
+		if !ok {
+			return nil, fmt.Errorf("unknown FleetProfile %q", profileName)
+		}
+		for _, application := range profile.Spec.Applications {
+			if application.Name == "" {
+				return nil, fmt.Errorf("FleetProfile %q contains an application without a name", profileName)
+			}
+			add(application)
+		}
+	}
+	for _, name := range extraApps {
+		add(FleetProfileApplication{Name: name})
+	}
+
+	skipped := make(map[string]struct{}, len(skipApps))
+	for _, name := range skipApps {
+		skipped[name] = struct{}{}
+		delete(applications, name)
+	}
+
+	filteredOrder := order[:0]
+	for _, name := range order {
+		if _, skip := skipped[name]; !skip {
+			filteredOrder = append(filteredOrder, name)
+		}
+	}
+	order = filteredOrder
+
+	for _, name := range order {
+		for _, dependency := range applications[name].DependsOn {
+			if _, ok := applications[dependency]; !ok {
+				return nil, fmt.Errorf("application %q depends on missing application %q", name, dependency)
+			}
+		}
+	}
+
+	const (
+		unvisited = iota
+		visiting
+		visited
+	)
+	state := make(map[string]int, len(applications))
+	stack := make([]string, 0, len(applications))
+	var calculateDepth func(string) (int, error)
+	calculateDepth = func(name string) (int, error) {
+		switch state[name] {
+		case visiting:
+			start := 0
+			for i, item := range stack {
+				if item == name {
+					start = i
+					break
+				}
+			}
+			cycle := append(append([]string{}, stack[start:]...), name)
+			return 0, fmt.Errorf("application dependency cycle: %s", strings.Join(cycle, " -> "))
+		case visited:
+			return applications[name].Depth, nil
+		}
+
+		state[name] = visiting
+		stack = append(stack, name)
+		depth := 0
+		for _, dependency := range applications[name].DependsOn {
+			dependencyDepth, err := calculateDepth(dependency)
+			if err != nil {
+				return 0, err
+			}
+			if dependencyDepth+1 > depth {
+				depth = dependencyDepth + 1
+			}
+		}
+		stack = stack[:len(stack)-1]
+		state[name] = visited
+		applications[name].Depth = depth
+		return depth, nil
+	}
+
+	resolved := make([]resolvedApplication, 0, len(order))
+	for _, name := range order {
+		if _, err := calculateDepth(name); err != nil {
+			return nil, err
+		}
+		resolved = append(resolved, *applications[name])
+	}
+	return resolved, nil
+}
+
+func applicationReady(application Application) bool {
+	if application.Status == nil {
+		return false
+	}
+	status := application.Status.Application
+	return status != nil &&
+		status.Health.Status == "Healthy" &&
+		status.Sync.Status == "Synced"
+}
+
 // desiredBindingsForCluster returns the ArgoCDApplication bindings a Cluster
 // should have. A Cluster is only considered when it matches the configured
 // selector AND has spec.argoCD.enabled: true.
-func desiredBindingsForCluster(cluster Cluster, cfg *Config) []Application {
+func desiredBindingsForCluster(
+	cluster Cluster,
+	cfg *Config,
+	profiles map[string]FleetProfile,
+	existing map[string]Application,
+) ([]Application, error) {
 	clusterName := cluster.Metadata.Name
 	if clusterName == "" {
-		return nil
+		return nil, nil
 	}
 	if !matchesSelector(cluster, cfg.ClusterSelector) {
-		return nil
+		return nil, nil
 	}
 	if !cluster.Spec.ArgoCD.Enabled {
-		return nil
+		return nil, nil
 	}
 
 	annotations := cluster.Metadata.Annotations
 
-	profiles := parseCSV(annotations[cfg.ProfileAnnotation])
-	if len(profiles) == 0 {
-		profiles = cfg.DefaultProfiles
+	profileNames := parseCSV(annotations[cfg.ProfileAnnotation])
+	if len(profileNames) == 0 {
+		profileNames = cfg.DefaultProfiles
 	}
 
-	var apps []string
-	for _, profile := range profiles {
-		profileConfig, ok := cfg.Profiles[profile]
-		if !ok {
-			logWarn("cluster %s references unknown profile %s", clusterName, profile)
-			continue
+	applications, err := resolveApplications(
+		profileNames,
+		profiles,
+		parseCSV(annotations[cfg.ExtraAppsAnnotation]),
+		parseCSV(annotations[cfg.SkipAppsAnnotation]),
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	bindings := make([]Application, 0, len(applications))
+	for _, application := range applications {
+		name := bindingName(application.Name, clusterName)
+		_, alreadyExists := existing[name]
+		if !alreadyExists {
+			dependenciesReady := true
+			for _, dependency := range application.DependsOn {
+				dependencyBinding, ok := existing[bindingName(dependency, clusterName)]
+				if !ok || !applicationReady(dependencyBinding) {
+					dependenciesReady = false
+					break
+				}
+			}
+			if !dependenciesReady {
+				logDebug(
+					"cluster %s application %s is waiting for dependencies: %s",
+					clusterName,
+					application.Name,
+					strings.Join(application.DependsOn, ","),
+				)
+				continue
+			}
 		}
-		apps = append(apps, profileConfig.Apps...)
-	}
 
-	apps = append(apps, parseCSV(annotations[cfg.ExtraAppsAnnotation])...)
-
-	skipped := make(map[string]struct{})
-	for _, app := range parseCSV(annotations[cfg.SkipAppsAnnotation]) {
-		skipped[app] = struct{}{}
-	}
-
-	apps = orderedUnique(apps)
-	filtered := apps[:0]
-	for _, app := range apps {
-		if _, skip := skipped[app]; !skip {
-			filtered = append(filtered, app)
-		}
-	}
-
-	bindings := make([]Application, 0, len(filtered))
-	for _, app := range filtered {
 		bindings = append(bindings, Application{
 			APIVersion: apiGroup + "/" + apiVersion,
 			Kind:       "ArgoCDApplication",
 			Metadata: ApplicationMeta{
-				Name:      bindingName(app, clusterName),
+				Name:      name,
 				Namespace: cfg.ProjectNamespace,
 				Labels: map[string]string{
 					"app.kubernetes.io/managed-by": managedBy,
 					generatedByLabel:               managedBy,
 					clusterLabel:                   labelValue(clusterName),
-					templateLabel:                  labelValue(app),
+					templateLabel:                  labelValue(application.Name),
 				},
 				Annotations: map[string]string{
-					profilesAnnotation: strings.Join(profiles, ","),
+					profilesAnnotation:        strings.Join(profileNames, ","),
+					dependsOnAnnotation:       strings.Join(application.DependsOn, ","),
+					dependencyDepthAnnotation: strconv.Itoa(application.Depth),
 				},
 			},
 			Spec: ApplicationSpec{
 				Destination: Destination{Cluster: ClusterRef{Name: clusterName}},
-				TemplateRef: TemplateRef{Name: app},
+				TemplateRef: TemplateRef{Name: application.Name},
 			},
 		})
 	}
-	return bindings
+	return bindings, nil
 }

@@ -1,0 +1,17 @@
+{{- if .Values.controller.enabled }}
+{{- range $name, $profile := .Values.profiles }}
+---
+apiVersion: fleet.lab.kurtmadel.com/v1alpha1
+kind: FleetProfile
+metadata:
+  name: {{ $name }}
+  namespace: {{ $.Values.projectNamespace }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+  labels:
+    {{- include "fleet-bindings.labels" $ | nindent 4 }}
+spec:
+  applications:
+    {{- toYaml $profile.applications | nindent 4 }}
+{{- end }}
+{{- end }}

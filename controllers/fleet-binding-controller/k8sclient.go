@@ -115,6 +115,23 @@ func (c *KubeClient) ListClusters(ctx context.Context) ([]Cluster, error) {
 	return list.Items, nil
 }
 
+func (c *KubeClient) ListFleetProfiles(ctx context.Context, namespace string) ([]FleetProfile, error) {
+	path := fmt.Sprintf(
+		"/apis/%s/%s/namespaces/%s/%s",
+		fleetAPIGroup,
+		fleetAPIVersion,
+		url.PathEscape(namespace),
+		fleetProfilesResource,
+	)
+	var list struct {
+		Items []FleetProfile `json:"items"`
+	}
+	if err := c.request(ctx, http.MethodGet, path, nil, "", &list); err != nil {
+		return nil, err
+	}
+	return list.Items, nil
+}
+
 func (c *KubeClient) ListArgoCDApplications(ctx context.Context, namespace string) ([]Application, error) {
 	path := fmt.Sprintf("/apis/%s/%s/namespaces/%s/%s", apiGroup, apiVersion, url.PathEscape(namespace), argoCDApplicationsResource)
 	var list struct {

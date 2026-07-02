@@ -36,6 +36,7 @@ func logAt(level logLevel, label, format string, args ...interface{}) {
 	log.Printf(label+" "+format, args...)
 }
 
+func logDebug(format string, args ...interface{}) { logAt(levelDebug, "DEBUG", format, args...) }
 func logInfo(format string, args ...interface{})  { logAt(levelInfo, "INFO", format, args...) }
 func logWarn(format string, args ...interface{})  { logAt(levelWarning, "WARNING", format, args...) }
 func logError(format string, args ...interface{}) { logAt(levelError, "ERROR", format, args...) }

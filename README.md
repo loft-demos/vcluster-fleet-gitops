@@ -94,12 +94,14 @@ vcluster-fleet-gitops/
     envoy-gateway.yaml            #   uniform (controller)
     envoy-gateway-config.yaml     #   per-cluster (edge: GatewayClass/EnvoyProxy/Gateway)
     cert-config.yaml              #   per-cluster (edge TLS certs via cert-manager)
+    external-dns.yaml             #   per-cluster (GoDaddy DNS records from base domain)
     vcluster-gitops-watcher.yaml  #   management-cluster-only
     charts/metallb-config/        #   wrapper: IPAddressPool from .Values.addressPool
     charts/envoy-gateway-config/  #   wrapper: edge from base domain + LB IP + platform host
     charts/cert-config/           #   wrapper: wildcard Certificates from base domain + issuer
     manifests/vcluster-gitops-watcher/   # centralized watcher manifests
-  bindings/                       # chart: controller + app profile config
+  bindings/                       # chart: controller + FleetProfile CRD/resources
+    README.md                     #   deploy/upgrade/uninstall instructions
     Chart.yaml
     values.yaml                   #   profiles, selector, controller image
     templates/
@@ -129,7 +131,7 @@ controller materializes the corresponding vCP `ArgoCDApplication` resources.
 Cluster labels + annotations
             |
             v
-fleet-binding-controller <--- profiles in bindings/values.yaml
+fleet-binding-controller <--- FleetProfile resources
             |
             v
 ArgoCDApplication ---> ArgoCDApplicationTemplate ---> target cluster
@@ -156,7 +158,8 @@ The design rules:
 - **Bindings carry no per-cluster values.** Because the values come off the
   Cluster, each `ArgoCDApplication` is just `name` + `destination.cluster.name` +
   `templateRef`. The fleet binding controller watches `Cluster` metadata and
-  creates those bindings from profiles in [`bindings/values.yaml`](bindings/values.yaml).
+  creates those bindings from namespaced `FleetProfile` resources rendered by
+  the bindings chart.
 
 Value precedence: template defaults, then `Cluster` annotations (per-cluster),
 then `ArgoCDApplication` parameters (per-binding override).
@@ -224,7 +227,10 @@ the same name.
 The controller image source lives in
 [`controllers/fleet-binding-controller`](controllers/fleet-binding-controller).
 Build and publish it, then update `controller.image.repository` and
-`controller.image.tag` in [`bindings/values.yaml`](bindings/values.yaml).
+`controller.image.tag` in [`bindings/values.yaml`](bindings/values.yaml). See
+[`bindings/README.md`](bindings/README.md) for chart install/upgrade/uninstall
+instructions, both the GitOps path and manual `helm` commands for local
+testing.
 
 ### Alternative: Static GitOps bindings
 
@@ -284,6 +290,28 @@ wrapper chart:
   `envoy-gateway-system` so the Gateway's name-only `certificateRefs` resolve.
   Needs cert-manager CRDs + a DNS01 issuer (wildcards); Argo CD retries until
   they exist.
+- **`external-dns`** publishes DNS records to GoDaddy using external-dns's
+  native `godaddy` provider (no webhook sidecar). `domainFilters` and
+  `txtOwnerId` are scoped to `fleet.lab.kurtmadel.com/base-domain`, so one
+  cluster's instance can never touch another cluster's records even though
+  they share a GoDaddy account. GoDaddy credentials are **not** stored in git;
+  create them out of band before this app can sync:
+
+  ```sh
+  kubectl -n external-dns create secret generic godaddy-api-credentials \
+    --from-literal=api-key=<GODADDY_API_KEY> \
+    --from-literal=api-secret=<GODADDY_API_SECRET>
+  ```
+
+  By itself, `external-dns` has nothing to watch, so
+  [`baseline/envoy-gateway-config.yaml`](baseline/envoy-gateway-config.yaml)
+  sets the wrapper chart's `externalDNS.enabled` to `true` fleet-wide,
+  annotating each cluster's edge LoadBalancer Service with that cluster's
+  wildcard hostnames (`*.<base>`, `*.apps.<base>`, plus `platformHostname`
+  when set). The chart's own default
+  ([`baseline/charts/envoy-gateway-config/values.yaml`](baseline/charts/envoy-gateway-config/values.yaml))
+  stays `false`, so anyone deploying it standalone (outside this template)
+  gets the safe default.
 
 The `Cluster` annotations are the fleet parameter sheet:
 
@@ -294,7 +322,7 @@ The `Cluster` annotations are the fleet parameter sheet:
 | `fleet.lab.kurtmadel.com/skip-apps` | `fleet-binding-controller` | `metallb` |
 | `fleet.lab.kurtmadel.com/metallb-pool` | `metallb-config` | `192.168.51.0/24` |
 | `fleet.lab.kurtmadel.com/gateway-lb-ip` | `envoy-gateway-config` | `192.168.51.10` |
-| `fleet.lab.kurtmadel.com/base-domain` | `envoy-gateway-config`, `cert-config` | `dc1.lab.kurtmadel.com` |
+| `fleet.lab.kurtmadel.com/base-domain` | `envoy-gateway-config`, `cert-config`, `external-dns` | `dc1.lab.kurtmadel.com` |
 | `fleet.lab.kurtmadel.com/cluster-issuer` | `cert-config` | `letsencrypt-prod` |
 | `fleet.lab.kurtmadel.com/platform-hostname` | `envoy-gateway-config` (Platform management cluster only) | `vcp.lab.kurtmadel.com` |
 
@@ -303,12 +331,12 @@ The `gateway-lb-ip` must sit inside the cluster's `metallb-pool`, and the
 
 ### Profiles
 
-Profiles are named app sets in [`bindings/values.yaml`](bindings/values.yaml).
-The built-in profiles are:
+Profiles are namespaced `FleetProfile` resources. The bindings chart renders
+the built-in resources from [`bindings/values.yaml`](bindings/values.yaml):
 
 | Profile | Purpose |
 |---------|---------|
-| `control-plane-baseline` | Shared control-plane stack: cert-manager, metrics-server, MetalLB, Envoy Gateway, and per-cluster edge/cert config |
+| `control-plane-baseline` | Shared control-plane stack: cert-manager, metrics-server, MetalLB, Envoy Gateway, per-cluster edge/cert config, and external-dns (GoDaddy) |
 | `vcp-management-cluster-baseline` | The control-plane baseline plus `vcluster-gitops-watcher`; use this for the Platform management cluster |
 | `gpu-nvidia-baseline` | Reserved NVIDIA GPU profile for `nvidia-gpu-operator` and `nvidia-dra-driver-gpu` |
 | `gpu-amd-baseline` | Reserved AMD GPU profile for `amd-gpu-operator` and `amd-dra-driver` |
@@ -317,6 +345,26 @@ GPU profiles are deliberately just profile entries until the matching
 `ArgoCDApplicationTemplate`s exist in `baseline/`. Add those templates first,
 then assign the profile to a cluster. That keeps a profile annotation from
 creating a binding to a missing template.
+
+Applications in a profile can declare `dependsOn`. The controller validates the
+combined profile graph for each Cluster and creates a dependent binding only
+after every prerequisite reports both
+`status.application.health.status: Healthy` and
+`status.application.sync.status: Synced`. Already-created dependents are
+preserved if a prerequisite later becomes unhealthy.
+
+```yaml
+spec:
+  applications:
+    - name: cert-manager
+    - name: cert-config
+      dependsOn:
+        - cert-manager
+```
+
+Unknown profiles, missing applications, and dependency cycles are treated as
+configuration errors. The controller preserves that Cluster's existing
+bindings rather than pruning to a partial state.
 
 ### The Platform management cluster is a fleet member
 

@@ -4,11 +4,15 @@ kind: ServiceAccount
 metadata:
   name: fleet-binding-controller
   namespace: {{ .Values.controller.namespace }}
+  labels:
+    {{- include "fleet-bindings.labels" . | nindent 4 }}
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
   name: fleet-binding-controller-cluster-read
+  labels:
+    {{- include "fleet-bindings.labels" . | nindent 4 }}
 rules:
   - apiGroups: ["management.loft.sh"]
     resources: ["clusters"]
@@ -18,6 +22,8 @@ apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
   name: fleet-binding-controller-cluster-read
+  labels:
+    {{- include "fleet-bindings.labels" . | nindent 4 }}
 subjects:
   - kind: ServiceAccount
     name: fleet-binding-controller
@@ -32,16 +38,23 @@ kind: Role
 metadata:
   name: fleet-binding-controller-argocdapplications
   namespace: {{ .Values.projectNamespace }}
+  labels:
+    {{- include "fleet-bindings.labels" . | nindent 4 }}
 rules:
   - apiGroups: ["management.loft.sh"]
     resources: ["argocdapplications"]
     verbs: ["get", "list", "watch", "create", "patch", "delete"]
+  - apiGroups: ["fleet.lab.kurtmadel.com"]
+    resources: ["fleetprofiles"]
+    verbs: ["get", "list", "watch"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
   name: fleet-binding-controller-argocdapplications
   namespace: {{ .Values.projectNamespace }}
+  labels:
+    {{- include "fleet-bindings.labels" . | nindent 4 }}
 subjects:
   - kind: ServiceAccount
     name: fleet-binding-controller

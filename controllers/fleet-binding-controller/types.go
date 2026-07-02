@@ -27,10 +27,11 @@ type ObjectMeta struct {
 // Application is the management.loft.sh/v1 ArgoCDApplication resource this
 // controller creates, patches, and deletes.
 type Application struct {
-	APIVersion string          `json:"apiVersion"`
-	Kind       string          `json:"kind"`
-	Metadata   ApplicationMeta `json:"metadata"`
-	Spec       ApplicationSpec `json:"spec"`
+	APIVersion string             `json:"apiVersion"`
+	Kind       string             `json:"kind"`
+	Metadata   ApplicationMeta    `json:"metadata"`
+	Spec       ApplicationSpec    `json:"spec"`
+	Status     *ApplicationStatus `json:"status,omitempty"`
 }
 
 type ApplicationMeta struct {
@@ -57,10 +58,44 @@ type TemplateRef struct {
 	Name string `json:"name"`
 }
 
+// ApplicationStatus is the subset of the Platform ArgoCDApplication status
+// used to gate dependent bindings. Platform copies the underlying Argo CD
+// ApplicationStatus into status.application.
+type ApplicationStatus struct {
+	Application *ArgoApplicationStatus `json:"application,omitempty"`
+}
+
+type ArgoApplicationStatus struct {
+	Health ArgoHealthStatus `json:"health,omitempty"`
+	Sync   ArgoSyncStatus   `json:"sync,omitempty"`
+}
+
+type ArgoHealthStatus struct {
+	Status string `json:"status,omitempty"`
+}
+
+type ArgoSyncStatus struct {
+	Status string `json:"status,omitempty"`
+}
+
 type Selector struct {
 	MatchLabels map[string]string `json:"matchLabels"`
 }
 
-type ProfileConfig struct {
-	Apps []string `json:"apps"`
+// FleetProfile is a namespaced fleet.lab.kurtmadel.com/v1alpha1 resource that
+// defines a dependency-aware set of ArgoCDApplicationTemplate bindings.
+type FleetProfile struct {
+	APIVersion string           `json:"apiVersion"`
+	Kind       string           `json:"kind"`
+	Metadata   ObjectMeta       `json:"metadata"`
+	Spec       FleetProfileSpec `json:"spec"`
+}
+
+type FleetProfileSpec struct {
+	Applications []FleetProfileApplication `json:"applications"`
+}
+
+type FleetProfileApplication struct {
+	Name      string   `json:"name"`
+	DependsOn []string `json:"dependsOn,omitempty"`
 }

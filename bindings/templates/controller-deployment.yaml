@@ -5,16 +5,16 @@ metadata:
   name: fleet-binding-controller
   namespace: {{ .Values.controller.namespace }}
   labels:
-    app.kubernetes.io/name: fleet-binding-controller
+    {{- include "fleet-bindings.labels" . | nindent 4 }}
 spec:
   replicas: {{ .Values.controller.replicaCount }}
   selector:
     matchLabels:
-      app.kubernetes.io/name: fleet-binding-controller
+      {{- include "fleet-bindings.selectorLabels" . | nindent 6 }}
   template:
     metadata:
       labels:
-        app.kubernetes.io/name: fleet-binding-controller
+        {{- include "fleet-bindings.labels" . | nindent 8 }}
       annotations:
         checksum/config: {{ include (print $.Template.BasePath "/controller-configmap.yaml") . | sha256sum }}
         {{- with .Values.controller.podAnnotations }}
@@ -22,19 +22,20 @@ spec:
         {{- end }}
     spec:
       serviceAccountName: fleet-binding-controller
+      # The controller reads its bearer token straight off the projected
+      # service account volume (no client-go), so this must stay true.
+      automountServiceAccountToken: true
       securityContext:
         runAsNonRoot: true
         runAsUser: 65532
         runAsGroup: 65532
       containers:
         - name: controller
-          image: "{{ .Values.controller.image.repository }}:{{ .Values.controller.image.tag }}"
+          image: "{{ .Values.controller.image.repository }}:{{ .Values.controller.image.tag }}{{ with .Values.controller.image.digest }}@{{ . }}{{ end }}"
           imagePullPolicy: {{ .Values.controller.image.pullPolicy }}
           env:
             - name: PROJECT_NAMESPACE
               value: {{ .Values.projectNamespace | quote }}
-            - name: FLEET_BINDING_PROFILES_PATH
-              value: /config/profiles.json
             - name: FLEET_BINDING_CLUSTER_SELECTOR_PATH
               value: /config/cluster-selector.json
             - name: FLEET_BINDING_DEFAULT_PROFILES

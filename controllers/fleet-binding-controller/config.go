@@ -12,7 +12,6 @@ import (
 
 type Config struct {
 	ProjectNamespace    string
-	Profiles            map[string]ProfileConfig
 	ClusterSelector     Selector
 	DefaultProfiles     []string
 	ProfileAnnotation   string
@@ -46,7 +45,6 @@ func loadJSON(value, path string, out interface{}) error {
 func buildConfig() (*Config, error) {
 	cfg := &Config{
 		ProjectNamespace: getEnv("PROJECT_NAMESPACE", "p-platform"),
-		Profiles:         map[string]ProfileConfig{},
 		ClusterSelector: Selector{
 			MatchLabels: map[string]string{"fleet.lab.kurtmadel.com/baseline": "true"},
 		},
@@ -54,14 +52,6 @@ func buildConfig() (*Config, error) {
 		ProfileAnnotation:   getEnv("FLEET_BINDING_PROFILE_ANNOTATION", "fleet.lab.kurtmadel.com/profiles"),
 		ExtraAppsAnnotation: getEnv("FLEET_BINDING_EXTRA_APPS_ANNOTATION", "fleet.lab.kurtmadel.com/extra-apps"),
 		SkipAppsAnnotation:  getEnv("FLEET_BINDING_SKIP_APPS_ANNOTATION", "fleet.lab.kurtmadel.com/skip-apps"),
-	}
-
-	if err := loadJSON(
-		os.Getenv("FLEET_BINDING_PROFILES_JSON"),
-		os.Getenv("FLEET_BINDING_PROFILES_PATH"),
-		&cfg.Profiles,
-	); err != nil {
-		return nil, fmt.Errorf("parsing profiles: %w", err)
 	}
 
 	if err := loadJSON(

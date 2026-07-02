@@ -31,6 +31,11 @@ spec:
             baseDomain: '{{ index .Values.loft.clusterAnnotations "fleet.lab.kurtmadel.com/base-domain" }}'
             gatewayLoadBalancerIP: '{{ index .Values.loft.clusterAnnotations "fleet.lab.kurtmadel.com/gateway-lb-ip" }}'
             platformHostname: '{{ index .Values.loft.clusterAnnotations "fleet.lab.kurtmadel.com/platform-hostname" }}'
+            # external-dns is bundled into every baseline profile, so wire the
+            # wildcard hostname annotation on by default here too. The chart's
+            # own default stays false for anyone deploying it standalone.
+            externalDNS:
+              enabled: true
       destination:
         namespace: envoy-gateway-system
       syncPolicy:

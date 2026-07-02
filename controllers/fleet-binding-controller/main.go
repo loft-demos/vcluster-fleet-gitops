@@ -3,8 +3,6 @@ package main
 import (
 	"context"
 	"log"
-	"sort"
-	"strings"
 	"time"
 )
 
@@ -27,12 +25,7 @@ func main() {
 		log.Fatalf("FATAL failed to initialize kubernetes client: %v", err)
 	}
 
-	profileNames := make([]string, 0, len(cfg.Profiles))
-	for name := range cfg.Profiles {
-		profileNames = append(profileNames, name)
-	}
-	sort.Strings(profileNames)
-	logInfo("starting %s for namespace %s with profiles: %s", managedBy, cfg.ProjectNamespace, strings.Join(profileNames, ", "))
+	logInfo("starting %s for namespace %s", managedBy, cfg.ProjectNamespace)
 
 	ctx := context.Background()
 	for {

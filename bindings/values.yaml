@@ -5,53 +5,83 @@ projectNamespace: p-platform
 #
 #   fleet.lab.kurtmadel.com/profiles: control-plane-baseline,gpu-nvidia-baseline
 #
-# The values here are templateRef names. Per-cluster values still live on the
+# These values render namespaced FleetProfile resources. Application names are
+# ArgoCDApplicationTemplate references. Per-cluster values still live on the
 # Cluster's fleet.lab.kurtmadel.com/* annotations and are consumed by the
-# ArgoCDApplicationTemplates.
+# ArgoCDApplicationTemplates. dependsOn gates initial creation until every
+# prerequisite is both Healthy and Synced.
 profiles:
   control-plane-baseline:
-    apps:
-      - cert-manager
-      - metrics-server
-      - metallb
-      - metallb-config
-      - envoy-gateway
-      - envoy-gateway-config
-      - cert-config
+    applications:
+      - name: cert-manager
+      - name: metrics-server
+      - name: metallb
+      - name: metallb-config
+        dependsOn:
+          - metallb
+      - name: envoy-gateway
+      - name: cert-config
+        dependsOn:
+          - cert-manager
+      - name: envoy-gateway-config
+        dependsOn:
+          - envoy-gateway
+          - metallb-config
+          - cert-config
+      - name: external-dns
+        dependsOn:
+          - envoy-gateway-config
 
   # Platform management cluster profile. It gets the control-plane baseline plus
   # the watcher that patches Argo CD application health and wakes sleeping vClusters.
   vcp-management-cluster-baseline:
-    apps:
-      - cert-manager
-      - metrics-server
-      - metallb
-      - metallb-config
-      - envoy-gateway
-      - envoy-gateway-config
-      - cert-config
-      - vcluster-gitops-watcher
+    applications:
+      - name: cert-manager
+      - name: metrics-server
+      - name: metallb
+      - name: metallb-config
+        dependsOn:
+          - metallb
+      - name: envoy-gateway
+      - name: cert-config
+        dependsOn:
+          - cert-manager
+      - name: envoy-gateway-config
+        dependsOn:
+          - envoy-gateway
+          - metallb-config
+          - cert-config
+      - name: external-dns
+        dependsOn:
+          - envoy-gateway-config
+      - name: vcluster-gitops-watcher
 
   # Reserved GPU profiles. Add the matching ArgoCDApplicationTemplates before
   # assigning these profiles to a Cluster.
   gpu-nvidia-baseline:
-    apps:
-      - nvidia-gpu-operator
-      - nvidia-dra-driver-gpu
+    applications:
+      - name: nvidia-gpu-operator
+      - name: nvidia-dra-driver-gpu
 
   gpu-amd-baseline:
-    apps:
-      - amd-gpu-operator
-      - amd-dra-driver
+    applications:
+      - name: amd-gpu-operator
+      - name: amd-dra-driver
 
 controller:
   enabled: true
   namespace: vcluster-platform
+  # The controller has no leader election: it just polls and reconciles
+  # idempotently. A value above 1 does not parallelize anything, it just adds
+  # redundant API calls against the vCP cluster every reconcile interval.
   replicaCount: 1
 
   image:
     repository: ghcr.io/loft-demos/vcluster-fleet-gitops/fleet-binding-controller
-    tag: "0.1.0"
+    tag: "0.3.0"
+    # Optional digest (sha256:...) to pin the image beyond the tag. Takes
+    # precedence over the tag when set: image is "repository:tag@digest".
+    digest: ""
     pullPolicy: IfNotPresent
 
   reconcileInterval: 30s

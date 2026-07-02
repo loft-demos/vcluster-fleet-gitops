@@ -1,0 +1,23 @@
+{{- if .Values.controller.enabled }}
+fleet-binding-controller is installed in {{ .Values.controller.namespace }}.
+
+Watch it reconcile:
+  kubectl -n {{ .Values.controller.namespace }} logs deploy/fleet-binding-controller -f
+
+Inspect the profiles and cluster selector used by this release:
+  kubectl -n {{ .Values.projectNamespace }} get fleetprofiles
+  kubectl -n {{ .Values.controller.namespace }} get configmap fleet-binding-controller-config -o yaml
+
+List the ArgoCDApplication bindings it has generated:
+  kubectl -n {{ .Values.projectNamespace }} get argocdapplications.management.loft.sh \
+    -l fleet.lab.kurtmadel.com/generated-by=fleet-binding-controller
+{{- else }}
+controller.enabled is false: no fleet-binding-controller Deployment was created.
+{{- if .Values.staticBindings.enabled }}
+staticBindings.enabled is true: bindings are rendered directly from
+staticBindings.clusters in {{ .Values.projectNamespace }} instead.
+{{- else }}
+staticBindings.enabled is also false: this release created no
+ArgoCDApplication bindings at all.
+{{- end }}
+{{- end }}
