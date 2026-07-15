@@ -23,6 +23,12 @@ const (
 	profilesAnnotation        = "fleet.lab.kurtmadel.com/profiles"
 	dependsOnAnnotation       = "fleet.lab.kurtmadel.com/depends-on"
 	dependencyDepthAnnotation = "fleet.lab.kurtmadel.com/dependency-depth"
+
+	// A Cluster annotation with this shape supplies one concrete parameter to
+	// the generated ArgoCDApplication whose templateRef matches <template-name>:
+	//
+	// <template-name>.argocd-template-param.fleet.lab.kurtmadel.com/<parameter-name>
+	templateParameterAnnotationSuffix = ".argocd-template-param.fleet.lab.kurtmadel.com"
 )
 
 func parseCSV(value string) []string {
@@ -225,6 +231,29 @@ func applicationReady(application Application) bool {
 		status.Sync.Status == "Synced"
 }
 
+// parametersForTemplate extracts exact ArgoCDApplicationTemplate parameter
+// names and string values from the destination Cluster's annotations. Keeping
+// the template name in the annotation's DNS prefix leaves the 63-character
+// annotation-name segment available for the parameter name.
+func parametersForTemplate(annotations map[string]string, templateName string) map[string]interface{} {
+	prefix := templateName + templateParameterAnnotationSuffix + "/"
+	var parameters map[string]interface{}
+	for key, value := range annotations {
+		if !strings.HasPrefix(key, prefix) {
+			continue
+		}
+		parameterName := strings.TrimPrefix(key, prefix)
+		if parameterName == "" {
+			continue
+		}
+		if parameters == nil {
+			parameters = map[string]interface{}{}
+		}
+		parameters[parameterName] = value
+	}
+	return parameters
+}
+
 // desiredBindingsForCluster returns the ArgoCDApplication bindings a Cluster
 // should have. A Cluster is only considered when it matches the configured
 // selector AND has spec.argoCD.enabled: true.
@@ -307,6 +336,7 @@ func desiredBindingsForCluster(
 			Spec: ApplicationSpec{
 				Destination: Destination{Cluster: ClusterRef{Name: clusterName}},
 				TemplateRef: TemplateRef{Name: application.Name},
+				Parameters:  parametersForTemplate(annotations, application.Name),
 			},
 		})
 	}

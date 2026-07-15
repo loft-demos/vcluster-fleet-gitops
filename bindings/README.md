@@ -103,6 +103,29 @@ kubectl -n p-platform get argocdapplications.management.loft.sh \
 
 See [`values.yaml`](values.yaml) for the full set and defaults.
 
+## Per-binding template parameters
+
+When an upstream `ArgoCDApplicationTemplate` requires a parameter that it does
+not resolve directly from `.Values.loft.clusterAnnotations`, put the concrete
+string value on the destination `Cluster` using:
+
+```text
+<templateRef.name>.argocd-template-param.fleet.lab.kurtmadel.com/<exact-parameter-name>
+```
+
+Example:
+
+```yaml
+metadata:
+  annotations:
+    fleet-observability-grafana.argocd-template-param.fleet.lab.kurtmadel.com/platformHost: vcp.lab.kurtmadel.com
+```
+
+This generates `spec.parameters.platformHost` only on the binding whose
+`templateRef.name` is `fleet-observability-grafana`. Removing the annotation
+removes the generated parameter on the next reconciliation. Parameter names
+are exact and case-sensitive, and annotations must not contain secrets.
+
 ## Notes on this chart's design
 
 - Resource names are fixed (not `{{ .Release.Name }}`-prefixed) because this

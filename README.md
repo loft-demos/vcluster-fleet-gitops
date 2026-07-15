@@ -165,11 +165,12 @@ The design rules:
   See [`baseline/metallb-config.yaml`](baseline/metallb-config.yaml). This is
   read-only: a template cannot write annotations back onto the `Cluster`, so the
   annotations are set on the `Cluster` object in git (and/or by provisioning IaC).
-- **Bindings carry no per-cluster values.** Because the values come off the
-  Cluster, each `ArgoCDApplication` is just `name` + `destination.cluster.name` +
-  `templateRef`. The fleet binding controller watches `Cluster` metadata and
-  creates those bindings from namespaced `FleetProfile` resources rendered by
-  the bindings chart.
+- **Bindings normally carry no per-cluster values.** Templates owned by this
+  repo read Cluster annotations directly. When an upstream template requires
+  an explicit application parameter, the controller resolves annotations named
+  `<template>.argocd-template-param.fleet.lab.kurtmadel.com/<parameter>` into
+  concrete `ArgoCDApplication.spec.parameters`. `FleetProfile` remains only the
+  application composition and dependency graph.
 
 Value precedence: template defaults, then `Cluster` annotations (per-cluster),
 then `ArgoCDApplication` parameters (per-binding override).
@@ -227,6 +228,11 @@ profile:
 | `fleet.lab.kurtmadel.com/profiles` | Comma-separated app profiles | `control-plane-baseline,gpu-nvidia-baseline` |
 | `fleet.lab.kurtmadel.com/extra-apps` | Extra templateRefs to bind | `custom-edge-config` |
 | `fleet.lab.kurtmadel.com/skip-apps` | Profile apps to omit | `metallb` |
+| `<template>.argocd-template-param.fleet.lab.kurtmadel.com/<parameter>` | Concrete parameter for one selected template | `fleet-observability-grafana.argocd-template-param.fleet.lab.kurtmadel.com/platformHost: vcp.lab.kurtmadel.com` |
+
+Template and parameter names in the last convention are exact and
+case-sensitive. The extended DNS prefix leaves the annotation name's
+63-character limit available to the parameter. Do not use it for secrets.
 
 Generated `ArgoCDApplication` objects are labelled with
 `fleet.lab.kurtmadel.com/generated-by=fleet-binding-controller`. The controller
@@ -349,6 +355,7 @@ The `Cluster` annotations are the fleet parameter sheet:
 | `fleet.lab.kurtmadel.com/dns-zone` | `external-dns` | `kurtmadel.com` |
 | `fleet.lab.kurtmadel.com/cluster-issuer` | `cert-config` | `letsencrypt-prod` |
 | `fleet.lab.kurtmadel.com/platform-hostname` | `envoy-gateway-config` (Platform management cluster only) | `vcp.lab.kurtmadel.com` |
+| `fleet-observability-grafana.argocd-template-param.fleet.lab.kurtmadel.com/platformHost` | Fleet Observability Grafana binding | `vcp.lab.kurtmadel.com` |
 
 The `gateway-lb-ip` must sit inside the cluster's `metallb-pool`, and the
 `cluster-issuer` must be a DNS01 issuer that can sign wildcards.
@@ -362,6 +369,7 @@ the built-in resources from [`bindings/values.yaml`](bindings/values.yaml):
 |---------|---------|
 | `control-plane-baseline` | Shared control-plane stack: cert-manager, metrics-server, MetalLB, Envoy Gateway, per-cluster edge/cert config, and external-dns (GoDaddy) |
 | `vcp-management-cluster-baseline` | The control-plane baseline plus `vcluster-gitops-watcher`; use this for the Platform management cluster |
+| `fleet-observability-platform` | Platform-side Prometheus, Grafana, and Cluster Collector bindings, with dependency ordering |
 | `gpu-nvidia-baseline` | Reserved NVIDIA GPU profile for `nvidia-gpu-operator` and `nvidia-dra-driver-gpu` |
 | `gpu-amd-baseline` | Reserved AMD GPU profile for `amd-gpu-operator` and `amd-dra-driver` |
 

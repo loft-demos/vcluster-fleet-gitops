@@ -115,6 +115,58 @@ func TestExtraAndSkipAnnotationsAdjustApps(t *testing.T) {
 	}
 }
 
+func TestTemplateParameterAnnotationsBecomeConcreteApplicationParameters(t *testing.T) {
+	profiles := indexFleetProfiles([]FleetProfile{
+		testProfile(
+			"fleet-observability-platform",
+			application("fleet-observability-prometheus"),
+			application("fleet-observability-grafana"),
+		),
+	})
+	cluster := testCluster(
+		"loft-cluster",
+		map[string]string{"fleet.lab.kurtmadel.com/baseline": "true"},
+		map[string]string{
+			"fleet.lab.kurtmadel.com/profiles": "fleet-observability-platform",
+			"fleet-observability-grafana.argocd-template-param.fleet.lab.kurtmadel.com/platformHost":      "vcp.lab.kurtmadel.com",
+			"fleet-observability-grafana.argocd-template-param.fleet.lab.kurtmadel.com/grafanaAdminGroup": "platform-admins",
+			"unselected-template.argocd-template-param.fleet.lab.kurtmadel.com/ignored":                    "value",
+		},
+		true,
+	)
+
+	bindings, err := desiredBindingsForCluster(cluster, testConfig, profiles, nil)
+	if err != nil {
+		t.Fatalf("desired bindings: %v", err)
+	}
+	if len(bindings) != 2 {
+		t.Fatalf("got %d bindings, want 2", len(bindings))
+	}
+	if bindings[0].Spec.Parameters != nil {
+		t.Fatalf("Prometheus parameters = %#v, want nil", bindings[0].Spec.Parameters)
+	}
+	want := map[string]interface{}{
+		"platformHost":      "vcp.lab.kurtmadel.com",
+		"grafanaAdminGroup": "platform-admins",
+	}
+	if !reflect.DeepEqual(bindings[1].Spec.Parameters, want) {
+		t.Fatalf("Grafana parameters = %#v, want %#v", bindings[1].Spec.Parameters, want)
+	}
+}
+
+func TestTemplateParameterAnnotationKeepsExactNameAndEmptyValue(t *testing.T) {
+	annotations := map[string]string{
+		"example.argocd-template-param.fleet.lab.kurtmadel.com/camelCase_name": "",
+		"example.argocd-template-param.fleet.lab.kurtmadel.com/other":          "set",
+		"example.argocd-template-param.fleet.lab.kurtmadel.com":                "ignored",
+	}
+
+	want := map[string]interface{}{"camelCase_name": "", "other": "set"}
+	if got := parametersForTemplate(annotations, "example"); !reflect.DeepEqual(got, want) {
+		t.Fatalf("got %#v, want %#v", got, want)
+	}
+}
+
 func TestUnselectedClusterGetsNoBindings(t *testing.T) {
 	cluster := testCluster("other", nil, nil, true)
 

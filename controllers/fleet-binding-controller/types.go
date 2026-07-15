@@ -42,8 +42,9 @@ type ApplicationMeta struct {
 }
 
 type ApplicationSpec struct {
-	Destination Destination `json:"destination"`
-	TemplateRef TemplateRef `json:"templateRef"`
+	Destination Destination            `json:"destination"`
+	TemplateRef TemplateRef            `json:"templateRef"`
+	Parameters  map[string]interface{} `json:"parameters,omitempty"`
 }
 
 type Destination struct {

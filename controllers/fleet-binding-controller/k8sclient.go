@@ -158,10 +158,18 @@ func (c *KubeClient) PatchArgoCDApplication(ctx context.Context, namespace, name
 			Labels      map[string]string `json:"labels"`
 			Annotations map[string]string `json:"annotations"`
 		} `json:"metadata"`
-		Spec ApplicationSpec `json:"spec"`
-	}{
-		Spec: application.Spec,
-	}
+		Spec struct {
+			Destination Destination `json:"destination"`
+			TemplateRef TemplateRef `json:"templateRef"`
+			// Parameters intentionally has no omitempty. A JSON null in this
+			// merge patch removes parameters when their Cluster annotations are
+			// deleted instead of leaving stale per-binding overrides behind.
+			Parameters map[string]interface{} `json:"parameters"`
+		} `json:"spec"`
+	}{}
+	patch.Spec.Destination = application.Spec.Destination
+	patch.Spec.TemplateRef = application.Spec.TemplateRef
+	patch.Spec.Parameters = application.Spec.Parameters
 	patch.Metadata.Labels = application.Metadata.Labels
 	patch.Metadata.Annotations = application.Metadata.Annotations
 

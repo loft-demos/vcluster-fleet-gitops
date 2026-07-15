@@ -140,6 +140,17 @@ func TestPatchArgoCDApplicationOmitsTypeMetadata(t *testing.T) {
 			if _, found := patch["spec"]; !found {
 				t.Errorf("patch is missing spec: %#v", patch)
 			}
+			spec, ok := patch["spec"].(map[string]interface{})
+			if !ok {
+				t.Fatalf("patch spec has unexpected type: %#v", patch["spec"])
+			}
+			parameters, found := spec["parameters"]
+			if !found {
+				t.Errorf("patch spec is missing parameters: %#v", spec)
+			}
+			if parameters != nil {
+				t.Errorf("parameters = %#v, want null to clear stale values", parameters)
+			}
 		}),
 	}
 

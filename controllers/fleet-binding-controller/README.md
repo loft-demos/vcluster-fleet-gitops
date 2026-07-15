@@ -23,6 +23,25 @@ The controller lists namespaced `FleetProfile` resources from the Platform
 project namespace. The cluster selector remains in the JSON file mounted by the
 `bindings` Helm chart.
 
+An eligible `Cluster` can supply concrete parameters to a generated binding
+with this annotation convention:
+
+```text
+<templateRef.name>.argocd-template-param.fleet.lab.kurtmadel.com/<exact-parameter-name>
+```
+
+For example:
+
+```yaml
+fleet-observability-grafana.argocd-template-param.fleet.lab.kurtmadel.com/platformHost: vcp.lab.kurtmadel.com
+```
+
+The controller places the resolved string under
+`ArgoCDApplication.spec.parameters.platformHost`. The template and parameter
+names are exact and case-sensitive. The long DNS prefix intentionally keeps the
+annotation's 63-character name segment available for the parameter name. Do
+not store secrets in these annotations.
+
 For dependency-aware profiles, a new binding is created only after all its
 prerequisites have:
 

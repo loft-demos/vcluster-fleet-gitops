@@ -68,6 +68,19 @@ profiles:
           - envoy-gateway-config
       - name: vcluster-gitops-watcher
 
+  # Central Fleet Observability stack for the vCluster Platform management
+  # cluster. Required per-binding parameters stay on the destination Cluster
+  # using the controller's <template>.argocd-template-param... convention.
+  fleet-observability-platform:
+    applications:
+      - name: fleet-observability-prometheus
+      - name: fleet-observability-grafana
+        dependsOn:
+          - fleet-observability-prometheus
+      - name: cluster-collector
+        dependsOn:
+          - fleet-observability-prometheus
+
   # Reserved GPU profiles. Add the matching ArgoCDApplicationTemplates before
   # assigning these profiles to a Cluster.
   gpu-nvidia-baseline:
