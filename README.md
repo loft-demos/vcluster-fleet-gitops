@@ -485,7 +485,7 @@ that setting lets it adopt the old Helm-rendered bindings during migration.
    ```sh
    helm upgrade --install fleet-bindings \
      oci://ghcr.io/loft-demos/vcluster-fleet-gitops/fleet-bindings \
-     --version 0.3.0 \
+     --version 0.4.1 \
      --namespace vcluster-platform \
      --create-namespace \
      -f bindings/values.yaml

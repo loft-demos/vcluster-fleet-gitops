@@ -9,8 +9,8 @@ selector AND has `spec.argoCD.enabled: true`.
 Build and publish:
 
 ```sh
-docker build -t ghcr.io/loft-demos/vcluster-fleet-gitops/fleet-binding-controller:0.3.0 .
-docker push ghcr.io/loft-demos/vcluster-fleet-gitops/fleet-binding-controller:0.3.0
+docker build -t ghcr.io/loft-demos/vcluster-fleet-gitops/fleet-binding-controller:0.4.1 .
+docker push ghcr.io/loft-demos/vcluster-fleet-gitops/fleet-binding-controller:0.4.1
 ```
 
 Run unit tests:
