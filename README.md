@@ -150,6 +150,13 @@ destination properties when it renders the generated application. The gateway
 derives trusted placement, shape, node-management, and hosting-cluster labels
 from the VCI. No template-specific tenant identity parameters are needed.
 
+The controller supplies `controller.virtualClusters.otlpEndpoint` as the
+required `otlpEndpoint` parameter on both built-in VCI collector bindings. An
+individual VCI can override it with
+`<collector-template>.argocd-template-param.fleet.lab.kurtmadel.com/otlpEndpoint`.
+This keeps the gateway endpoint centralized without requiring changes to every
+`VirtualClusterTemplate`.
+
 Every enrolled VCI receives an exact-scope `metrics-writer` AccessKey. The
 controller delivers it directly to `observability/otel-otlp-auth` through the
 Platform VCI proxy; the token is not stored in Git or application parameters.
@@ -506,7 +513,7 @@ that setting lets it adopt the old Helm-rendered bindings during migration.
    ```sh
    helm upgrade --install fleet-bindings \
      oci://ghcr.io/loft-demos/vcluster-fleet-gitops/fleet-bindings \
-     --version 0.5.0 \
+     --version 0.6.0 \
      --namespace vcluster-platform \
      --create-namespace \
      -f bindings/values.yaml

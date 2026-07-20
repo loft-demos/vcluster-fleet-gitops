@@ -53,6 +53,8 @@ spec:
               value: {{ .Values.controller.virtualClusters.privateNodesProfile | quote }}
             - name: FLEET_BINDING_VCI_SHARED_NODES_PROFILE
               value: {{ .Values.controller.virtualClusters.sharedNodesProfile | quote }}
+            - name: FLEET_BINDING_VCI_OTLP_ENDPOINT
+              value: {{ .Values.controller.virtualClusters.otlpEndpoint | quote }}
             - name: FLEET_BINDING_VCI_DISABLED_ANNOTATION
               value: {{ .Values.controller.virtualClusters.disabledAnnotation | quote }}
             - name: FLEET_BINDING_VCI_PROFILE_OVERRIDE_ANNOTATION

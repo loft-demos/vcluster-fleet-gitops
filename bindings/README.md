@@ -35,10 +35,10 @@ Inspect and render the published chart before installing:
 ```sh
 helm show chart \
   oci://ghcr.io/loft-demos/vcluster-fleet-gitops/fleet-bindings \
-  --version 0.5.0
+  --version 0.6.0
 helm template fleet-bindings \
   oci://ghcr.io/loft-demos/vcluster-fleet-gitops/fleet-bindings \
-  --version 0.5.0 \
+  --version 0.6.0 \
   --namespace vcluster-platform
 ```
 
@@ -47,7 +47,7 @@ Install or upgrade:
 ```sh
 helm upgrade --install fleet-bindings \
   oci://ghcr.io/loft-demos/vcluster-fleet-gitops/fleet-bindings \
-  --version 0.5.0 \
+  --version 0.6.0 \
   --namespace vcluster-platform \
   --create-namespace
 ```
@@ -57,7 +57,7 @@ Override values inline, or with `-f my-values.yaml`:
 ```sh
 helm upgrade --install fleet-bindings \
   oci://ghcr.io/loft-demos/vcluster-fleet-gitops/fleet-bindings \
-  --version 0.5.0 \
+  --version 0.6.0 \
   --namespace vcluster-platform \
   --set controller.image.tag=0.2.0 \
   --set controller.reconcileInterval=15s
@@ -104,6 +104,7 @@ kubectl -n p-platform get argocdapplications.management.loft.sh \
 | `controller.image.repository` / `.tag` / `.digest` | Controller image; an empty tag uses `Chart.yaml` `appVersion`, while `.digest` optionally pins beyond the tag |
 | `controller.clusterSelector` | Label selector for which `Cluster` resources are eligible |
 | `controller.virtualClusters.*` | Automatic VCI profile selection and its opt-out/override annotations |
+| `controller.virtualClusters.otlpEndpoint` | Default required `otlpEndpoint` for built-in VCI collector bindings; a per-VCI template-parameter annotation overrides it |
 | `controller.writerCredentials.*` | Per-VCI writer key and tenant Secret delivery settings |
 | `controller.reconcileInterval` | Poll interval (e.g. `30s`, `5m`) |
 | `staticBindings.enabled` | Alternative mode: render bindings from `staticBindings.clusters` instead of running the controller |
@@ -167,6 +168,17 @@ This generates `spec.parameters.externalHost` only on the binding whose
 `templateRef.name` is `example-dashboard`. Removing the annotation
 removes the generated parameter on the next reconciliation. Parameter names
 are exact and case-sensitive, and annotations must not contain secrets.
+
+For the built-in `cluster-collector` and `shared-node-tenant-collector` VCI
+bindings, the controller first sets `otlpEndpoint` from
+`controller.virtualClusters.otlpEndpoint`. The same annotation convention can
+override that default for one VCI, for example:
+
+```yaml
+metadata:
+  annotations:
+    cluster-collector.argocd-template-param.fleet.lab.kurtmadel.com/otlpEndpoint: https://tenant-otel.example.com
+```
 
 ## Notes on this chart's design
 

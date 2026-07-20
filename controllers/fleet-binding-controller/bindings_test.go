@@ -19,6 +19,7 @@ var testConfig = &Config{
 		Enabled:                   true,
 		PrivateNodesProfile:       "tenant-observability-private-nodes",
 		SharedNodesProfile:        "tenant-observability-shared-nodes",
+		OTLPEndpoint:              "https://otel.lab.kurtmadel.com",
 		DisabledAnnotation:        "fleet.lab.kurtmadel.com/observability-disabled",
 		ProfileOverrideAnnotation: "fleet.lab.kurtmadel.com/observability-profile",
 	},
@@ -268,6 +269,69 @@ func TestVirtualClusterAutomaticallySelectsPrivateNodesObservability(t *testing.
 	}
 	if bindings[0].Metadata.Name == bindingName("cluster-collector", "private-tenant") {
 		t.Fatalf("VCI binding name collides with Cluster binding: %s", bindings[0].Metadata.Name)
+	}
+}
+
+func TestVirtualClusterCollectorsReceiveDefaultOTLPEndpoint(t *testing.T) {
+	tests := []struct {
+		name       string
+		helmValues string
+		template   string
+	}{
+		{name: "private nodes", helmValues: "privateNodes:\n  enabled: true\n", template: privateNodesCollectorTemplate},
+		{name: "shared nodes", helmValues: "privateNodes:\n  enabled: false\n", template: sharedNodesCollectorTemplate},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			instance := testVirtualClusterInstance("p-default", "tenant", tt.helmValues, nil)
+			bindings, _, _, err := desiredBindingsForVirtualClusterInstance(instance, testConfig, testProfiles, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(bindings) != 1 || bindings[0].Spec.TemplateRef.Name != tt.template {
+				t.Fatalf("unexpected bindings: %#v", bindings)
+			}
+			if got := bindings[0].Spec.Parameters[otlpEndpointParameter]; got != testConfig.VCIObservability.OTLPEndpoint {
+				t.Fatalf("otlpEndpoint = %#v, want %q", got, testConfig.VCIObservability.OTLPEndpoint)
+			}
+		})
+	}
+}
+
+func TestVirtualClusterCollectorAnnotationOverridesDefaultOTLPEndpoint(t *testing.T) {
+	const override = "https://tenant-otel.example.com"
+	instance := testVirtualClusterInstance("p-default", "tenant", "privateNodes:\n  enabled: true\n", map[string]string{
+		privateNodesCollectorTemplate + templateParameterAnnotationSuffix + "/" + otlpEndpointParameter: override,
+	})
+	bindings, _, _, err := desiredBindingsForVirtualClusterInstance(instance, testConfig, testProfiles, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := bindings[0].Spec.Parameters[otlpEndpointParameter]; got != override {
+		t.Fatalf("otlpEndpoint = %#v, want annotation override %q", got, override)
+	}
+}
+
+func TestVirtualClusterOTLPEndpointDefaultIsCollectorOnly(t *testing.T) {
+	profiles := indexFleetProfiles([]FleetProfile{
+		testProfile("tenant-observability-shared-nodes", application(sharedNodesCollectorTemplate)),
+		testProfile("tenant-addon", application("tenant-dashboard")),
+	})
+	instance := testVirtualClusterInstance("p-default", "tenant", "privateNodes:\n  enabled: false\n", map[string]string{
+		testConfig.ProfileAnnotation: "tenant-addon",
+	})
+	bindings, _, _, err := desiredBindingsForVirtualClusterInstance(instance, testConfig, profiles, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(bindings) != 2 {
+		t.Fatalf("got %d bindings, want 2", len(bindings))
+	}
+	if bindings[0].Spec.Parameters[otlpEndpointParameter] != testConfig.VCIObservability.OTLPEndpoint {
+		t.Fatalf("collector parameters = %#v", bindings[0].Spec.Parameters)
+	}
+	if bindings[1].Spec.Parameters != nil {
+		t.Fatalf("non-collector parameters = %#v, want nil", bindings[1].Spec.Parameters)
 	}
 }
 

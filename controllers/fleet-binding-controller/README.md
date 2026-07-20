@@ -41,8 +41,8 @@ the controller removes the writer key and VCI teardown removes the Secret.
 Build and publish:
 
 ```sh
-docker build -t ghcr.io/loft-demos/vcluster-fleet-gitops/fleet-binding-controller:0.5.0 .
-docker push ghcr.io/loft-demos/vcluster-fleet-gitops/fleet-binding-controller:0.5.0
+docker build -t ghcr.io/loft-demos/vcluster-fleet-gitops/fleet-binding-controller:0.6.0 .
+docker push ghcr.io/loft-demos/vcluster-fleet-gitops/fleet-binding-controller:0.6.0
 ```
 
 Run unit tests:
@@ -74,6 +74,11 @@ The controller places the resolved string under
 names are exact and case-sensitive. The long DNS prefix intentionally keeps the
 annotation's 63-character name segment available for the parameter name. Do
 not store secrets in these annotations.
+
+For VCI observability, `FLEET_BINDING_VCI_OTLP_ENDPOINT` supplies a centralized
+`otlpEndpoint` default to the built-in `cluster-collector` and
+`shared-node-tenant-collector` bindings. A matching annotation on an individual
+VCI overrides the controller default.
 
 For dependency-aware profiles, a new binding is created only after all its
 prerequisites have:

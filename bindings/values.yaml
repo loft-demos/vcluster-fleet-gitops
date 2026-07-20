@@ -133,6 +133,10 @@ controller:
     observabilityEnabled: true
     privateNodesProfile: tenant-observability-private-nodes
     sharedNodesProfile: tenant-observability-shared-nodes
+    # Default required otlpEndpoint parameter for the built-in private- and
+    # shared-node collector templates. A matching per-VCI template-parameter
+    # annotation overrides this value.
+    otlpEndpoint: https://otel.lab.kurtmadel.com
     disabledAnnotation: fleet.lab.kurtmadel.com/observability-disabled
     profileOverrideAnnotation: fleet.lab.kurtmadel.com/observability-profile
 

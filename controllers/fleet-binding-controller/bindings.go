@@ -35,6 +35,10 @@ const (
 	//
 	// <template-name>.argocd-template-param.fleet.lab.kurtmadel.com/<parameter-name>
 	templateParameterAnnotationSuffix = ".argocd-template-param.fleet.lab.kurtmadel.com"
+
+	privateNodesCollectorTemplate = "cluster-collector"
+	sharedNodesCollectorTemplate  = "shared-node-tenant-collector"
+	otlpEndpointParameter         = "otlpEndpoint"
 )
 
 func parseCSV(value string) []string {
@@ -121,6 +125,9 @@ type bindingTarget struct {
 	Destination Destination
 	BindingName func(string, string) string
 	Labels      map[string]string
+	// ParameterDefaults are applied per template before source annotations.
+	// A source annotation with the same parameter name always wins.
+	ParameterDefaults map[string]map[string]interface{}
 }
 
 func indexFleetProfiles(profiles []FleetProfile) map[string]FleetProfile {
@@ -278,6 +285,38 @@ func parametersForTemplate(annotations map[string]string, templateName string) m
 	return parameters
 }
 
+func parametersForTemplateWithDefaults(
+	annotations map[string]string,
+	templateName string,
+	defaults map[string]map[string]interface{},
+) map[string]interface{} {
+	var parameters map[string]interface{}
+	if templateDefaults := defaults[templateName]; len(templateDefaults) > 0 {
+		parameters = make(map[string]interface{}, len(templateDefaults))
+		for name, value := range templateDefaults {
+			parameters[name] = value
+		}
+	}
+	for name, value := range parametersForTemplate(annotations, templateName) {
+		if parameters == nil {
+			parameters = map[string]interface{}{}
+		}
+		parameters[name] = value
+	}
+	return parameters
+}
+
+func vciCollectorParameterDefaults(cfg *Config) map[string]map[string]interface{} {
+	endpoint := strings.TrimSpace(cfg.VCIObservability.OTLPEndpoint)
+	if endpoint == "" {
+		return nil
+	}
+	return map[string]map[string]interface{}{
+		privateNodesCollectorTemplate: {otlpEndpointParameter: endpoint},
+		sharedNodesCollectorTemplate:  {otlpEndpointParameter: endpoint},
+	}
+}
+
 // desiredBindingsForCluster returns the ArgoCDApplication bindings a Cluster
 // should have. A Cluster is only considered when it matches the configured
 // selector AND has spec.argoCD.enabled: true.
@@ -391,6 +430,7 @@ func desiredBindingsForVirtualClusterInstance(
 		Labels: map[string]string{
 			virtualClusterLabel: instance.Metadata.Name,
 		},
+		ParameterDefaults: vciCollectorParameterDefaults(cfg),
 	}, instance.Metadata.Annotations, profileNames, cfg, profiles, existing)
 	return bindings, true, true, err
 }
@@ -463,7 +503,11 @@ func desiredBindings(
 			Spec: ApplicationSpec{
 				Destination: target.Destination,
 				TemplateRef: TemplateRef{Name: application.Name},
-				Parameters:  parametersForTemplate(annotations, application.Name),
+				Parameters: parametersForTemplateWithDefaults(
+					annotations,
+					application.Name,
+					target.ParameterDefaults,
+				),
 			},
 		})
 	}

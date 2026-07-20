@@ -25,6 +25,7 @@ type VCIObservabilityConfig struct {
 	Enabled                   bool
 	PrivateNodesProfile       string
 	SharedNodesProfile        string
+	OTLPEndpoint              string
 	DisabledAnnotation        string
 	ProfileOverrideAnnotation string
 }
@@ -106,6 +107,7 @@ func buildConfig() (*Config, error) {
 			Enabled:                   vciObservabilityEnabled,
 			PrivateNodesProfile:       getEnv("FLEET_BINDING_VCI_PRIVATE_NODES_PROFILE", "tenant-observability-private-nodes"),
 			SharedNodesProfile:        getEnv("FLEET_BINDING_VCI_SHARED_NODES_PROFILE", "tenant-observability-shared-nodes"),
+			OTLPEndpoint:              getEnv("FLEET_BINDING_VCI_OTLP_ENDPOINT", "https://otel.lab.kurtmadel.com"),
 			DisabledAnnotation:        getEnv("FLEET_BINDING_VCI_DISABLED_ANNOTATION", "fleet.lab.kurtmadel.com/observability-disabled"),
 			ProfileOverrideAnnotation: getEnv("FLEET_BINDING_VCI_PROFILE_OVERRIDE_ANNOTATION", "fleet.lab.kurtmadel.com/observability-profile"),
 		},
