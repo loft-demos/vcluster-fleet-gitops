@@ -8,12 +8,14 @@ GitOps design.
 ## Prerequisites
 
 - A Kubernetes cluster with the vCluster Platform CRDs installed
-  (`clusters.management.loft.sh`, `argocdapplications.management.loft.sh`).
+  (`clusters.management.loft.sh`, `virtualclusterinstances.management.loft.sh`,
+  `argocdapplications.management.loft.sh`, and `accesskeys.storage.loft.sh`).
 - The target namespace (`controller.namespace`, default `vcluster-platform`)
   already exists. This chart does not create it.
 - The Platform project namespace (`projectNamespace`, default `p-platform`)
-  already exists. `FleetProfile` and generated `ArgoCDApplication` resources
-  live there.
+  already exists. Central `FleetProfile` and Cluster-targeted generated
+  `ArgoCDApplication` resources live there; VCI-targeted applications live in
+  each VCI's project namespace.
 - If you're not using the default `controller.image.tag`, build and push the
   controller image first (see the
   [controller README](../controllers/fleet-binding-controller/README.md)).
@@ -33,10 +35,10 @@ Inspect and render the published chart before installing:
 ```sh
 helm show chart \
   oci://ghcr.io/loft-demos/vcluster-fleet-gitops/fleet-bindings \
-  --version 0.4.1
+  --version 0.5.0
 helm template fleet-bindings \
   oci://ghcr.io/loft-demos/vcluster-fleet-gitops/fleet-bindings \
-  --version 0.4.1 \
+  --version 0.5.0 \
   --namespace vcluster-platform
 ```
 
@@ -45,7 +47,7 @@ Install or upgrade:
 ```sh
 helm upgrade --install fleet-bindings \
   oci://ghcr.io/loft-demos/vcluster-fleet-gitops/fleet-bindings \
-  --version 0.4.1 \
+  --version 0.5.0 \
   --namespace vcluster-platform \
   --create-namespace
 ```
@@ -55,7 +57,7 @@ Override values inline, or with `-f my-values.yaml`:
 ```sh
 helm upgrade --install fleet-bindings \
   oci://ghcr.io/loft-demos/vcluster-fleet-gitops/fleet-bindings \
-  --version 0.4.1 \
+  --version 0.5.0 \
   --namespace vcluster-platform \
   --set controller.image.tag=0.2.0 \
   --set controller.reconcileInterval=15s
@@ -73,11 +75,14 @@ It does **not** remove the `ArgoCDApplication` bindings the controller generated
 clean them up explicitly if needed:
 
 ```sh
-kubectl -n p-platform delete argocdapplications.management.loft.sh \
+kubectl delete argocdapplications.management.loft.sh -A \
+  -l fleet.lab.kurtmadel.com/generated-by=fleet-binding-controller
+kubectl delete accesskeys.storage.loft.sh \
   -l fleet.lab.kurtmadel.com/generated-by=fleet-binding-controller
 ```
 
-(replace `p-platform` with your `projectNamespace`).
+Delete the generated tenant Secrets before uninstalling if VCIs will remain;
+after the controller is gone it cannot reach each tenant to remove them.
 
 ## Verifying
 
@@ -93,15 +98,52 @@ kubectl -n p-platform get argocdapplications.management.loft.sh \
 
 | Value | Purpose |
 |-------|---------|
-| `projectNamespace` | Namespace the generated `ArgoCDApplication` bindings live in |
+| `projectNamespace` | Central FleetProfile namespace and namespace for Cluster-targeted bindings |
 | `profiles` | `FleetProfile` definitions, including application dependencies |
 | `controller.enabled` | Deploy the controller Deployment/RBAC/ConfigMap |
-| `controller.image.repository` / `.tag` / `.digest` | Controller image; `.digest` optionally pins beyond the tag |
+| `controller.image.repository` / `.tag` / `.digest` | Controller image; an empty tag uses `Chart.yaml` `appVersion`, while `.digest` optionally pins beyond the tag |
 | `controller.clusterSelector` | Label selector for which `Cluster` resources are eligible |
+| `controller.virtualClusters.*` | Automatic VCI profile selection and its opt-out/override annotations |
+| `controller.writerCredentials.*` | Per-VCI writer key and tenant Secret delivery settings |
 | `controller.reconcileInterval` | Poll interval (e.g. `30s`, `5m`) |
 | `staticBindings.enabled` | Alternative mode: render bindings from `staticBindings.clusters` instead of running the controller |
 
 See [`values.yaml`](values.yaml) for the full set and defaults.
+
+## Automatic tenant observability
+
+The chart renders two central FleetProfiles:
+
+| Rendered VCI shape | FleetProfile | Template |
+| --- | --- | --- |
+| `privateNodes.enabled: true` | `tenant-observability-private-nodes` | Platform `cluster-collector` |
+| Shared Nodes | `tenant-observability-shared-nodes` | `shared-node-tenant-collector` from `baseline/` |
+
+VCIs are discovered cluster-wide, and each generated `ArgoCDApplication` is
+created in that VCI's project namespace. FleetProfiles remain central in
+`projectNamespace`. A VCI must have a usable Argo CD connector so Platform can
+resolve the generated `virtualCluster` destination.
+
+Before enabling writer credentials, set `platformURL` to an address reachable
+from the controller pod. Use `platformCASecretName` for a private CA;
+`insecureSkipVerify` is for temporary demonstrations only. The collector
+templates and controller must agree on the `otel-otlp-auth` Secret name.
+
+The controller refuses to overwrite or delete an existing Secret of that name
+unless it carries
+`fleet.lab.kurtmadel.com/generated-by=fleet-binding-controller`. Before
+migrating a manually managed tenant, delete its old manual
+`ArgoCDApplication` and `otel-otlp-auth` Secret (or explicitly label the Secret
+for adoption). This also avoids running the old and automatic collectors at the
+same time.
+
+```sh
+kubectl get virtualclusterinstances.management.loft.sh -A
+kubectl get argocdapplications.management.loft.sh -A \
+  -l fleet.lab.kurtmadel.com/source-kind=virtualclusterinstance
+kubectl get accesskeys.storage.loft.sh \
+  -l fleet.lab.kurtmadel.com/credential-purpose=metrics-writer
+```
 
 ## Per-binding template parameters
 
@@ -118,11 +160,11 @@ Example:
 ```yaml
 metadata:
   annotations:
-    fleet-observability-grafana.argocd-template-param.fleet.lab.kurtmadel.com/platformHost: vcp.lab.kurtmadel.com
+    example-dashboard.argocd-template-param.fleet.lab.kurtmadel.com/externalHost: dashboard.example.com
 ```
 
-This generates `spec.parameters.platformHost` only on the binding whose
-`templateRef.name` is `fleet-observability-grafana`. Removing the annotation
+This generates `spec.parameters.externalHost` only on the binding whose
+`templateRef.name` is `example-dashboard`. Removing the annotation
 removes the generated parameter on the next reconciliation. Parameter names
 are exact and case-sensitive, and annotations must not contain secrets.
 

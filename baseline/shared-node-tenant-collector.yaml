@@ -1,0 +1,195 @@
+# Shared-node-safe Fleet Observability collector. This deliberately contains
+# no DaemonSet, node-exporter, hostNetwork, hostPort, hostPath, hostmetrics,
+# kubelet scrape, or cAdvisor scrape.
+apiVersion: storage.loft.sh/v1
+kind: ArgoCDApplicationTemplate
+metadata:
+  name: shared-node-tenant-collector
+spec:
+  displayName: Fleet Observability - Shared Nodes Tenant Collector
+  description: >-
+    Shared-node-safe tenant collector containing an OpenTelemetry Deployment,
+    Kubernetes cluster-state receiver, kube-state-metrics, and tenant-scoped
+    OTLP/HTTP export to the Fleet Observability Write Gateway.
+  owner:
+    user: admin
+  parameters:
+    - variable: destinationNamespace
+      label: Destination Namespace
+      type: string
+      required: true
+      defaultValue: observability
+    - variable: project
+      label: Argo CD Project
+      type: string
+      required: true
+      defaultValue: default
+    - variable: otlpEndpoint
+      label: OTLP/HTTP endpoint
+      type: string
+      required: true
+      defaultValue: https://otel.lab.kurtmadel.com
+    - variable: otlpCaData
+      label: OTLP CA certificate
+      type: multiline
+    - variable: otlpInsecureSkipVerify
+      label: Skip OTLP TLS verification
+      type: boolean
+      defaultValue: "false"
+  template:
+    spec:
+      destination:
+        server: https://kubernetes.default.svc
+        namespace: "{{ .Values.destinationNamespace }}"
+      project: "{{ .Values.project }}"
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: true
+        syncOptions:
+          - CreateNamespace=true
+          - ServerSideApply=true
+      sources:
+        - repoURL: https://open-telemetry.github.io/opentelemetry-helm-charts
+          chart: opentelemetry-collector
+          targetRevision: 0.162.0
+          helm:
+            releaseName: otel-deploy
+            values: |
+              {{- $loft := .Values.loft | default dict }}
+              {{- if or (not $loft.project) (not $loft.name) }}
+              {{- fail "shared-node-tenant-collector requires a VirtualClusterInstance destination" }}
+              {{- end }}
+
+              mode: deployment
+              replicaCount: 1
+              fullnameOverride: otel-deploy
+
+              image:
+                repository: otel/opentelemetry-collector-contrib
+
+              ports:
+                otlp:
+                  enabled: false
+                otlp-http:
+                  enabled: false
+                jaeger-compact:
+                  enabled: false
+                jaeger-thrift:
+                  enabled: false
+                jaeger-grpc:
+                  enabled: false
+                zipkin:
+                  enabled: false
+
+              service:
+                enabled: false
+
+              presets:
+                clusterMetrics:
+                  enabled: true
+
+              clusterRole:
+                create: true
+                rules:
+                  - apiGroups: [""]
+                    resources: ["pods"]
+                    verbs: ["get", "list", "watch"]
+
+              extraVolumes:
+                - name: otlp-auth
+                  secret:
+                    secretName: otel-otlp-auth
+              {{- if .Values.otlpCaData }}
+                - name: otlp-ca
+                  configMap:
+                    name: otel-deploy-otlp-ca
+              {{- end }}
+
+              extraVolumeMounts:
+                - name: otlp-auth
+                  mountPath: /etc/otel/auth
+                  readOnly: true
+              {{- if .Values.otlpCaData }}
+                - name: otlp-ca
+                  mountPath: /etc/otel/otlp-ca
+                  readOnly: true
+              {{- end }}
+
+              config:
+                receivers:
+                  prometheus:
+                    config:
+                      scrape_configs:
+                        - job_name: kube-state-metrics
+                          scrape_interval: 30s
+                          kubernetes_sd_configs:
+                            - role: pod
+                              namespaces:
+                                names:
+                                  - {{ .Values.destinationNamespace | quote }}
+                          relabel_configs:
+                            - source_labels:
+                                - __meta_kubernetes_pod_label_app_kubernetes_io_name
+                                - __meta_kubernetes_pod_label_app_kubernetes_io_instance
+                              regex: kube-state-metrics;ksm
+                              action: keep
+                            - source_labels:
+                                - __meta_kubernetes_pod_container_port_number
+                              regex: "8080"
+                              action: keep
+
+                processors:
+                  memory_limiter:
+                    check_interval: 1s
+                    limit_percentage: 75
+                    spike_limit_percentage: 15
+                  batch:
+                    send_batch_size: 10000
+                    timeout: 10s
+
+                exporters:
+                  otlp_http:
+                    endpoint: {{ .Values.otlpEndpoint | quote }}
+                    headers:
+                      X-Vcluster-Platform-Project: {{ $loft.project | quote }}
+                      X-Vcluster-Platform-Instance: {{ $loft.name | quote }}
+                      Authorization: "${file:/etc/otel/auth/authorization}"
+              {{- if .Values.otlpInsecureSkipVerify }}
+                    tls:
+                      insecure_skip_verify: true
+              {{- else if .Values.otlpCaData }}
+                    tls:
+                      ca_file: /etc/otel/otlp-ca/ca.crt
+              {{- end }}
+
+                service:
+                  pipelines:
+                    metrics:
+                      receivers: [k8s_cluster, prometheus]
+                      processors: [memory_limiter, batch]
+                      exporters: [otlp_http]
+                    logs: null
+                    traces: null
+
+              extraManifests:
+              {{- if .Values.otlpCaData }}
+                - apiVersion: v1
+                  kind: ConfigMap
+                  metadata:
+                    name: otel-deploy-otlp-ca
+                    namespace: {{ .Values.destinationNamespace | quote }}
+                  data:
+                    ca.crt: {{ .Values.otlpCaData | quote }}
+              {{- end }}
+
+        - repoURL: https://prometheus-community.github.io/helm-charts
+          chart: kube-state-metrics
+          targetRevision: 7.5.1
+          helm:
+            releaseName: ksm
+            values: |
+              replicas: 1
+              hostNetwork: false
+              metricLabelsAllowlist:
+                - nodes=[*]

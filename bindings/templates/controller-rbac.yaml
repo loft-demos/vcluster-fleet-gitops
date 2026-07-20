@@ -17,6 +17,17 @@ rules:
   - apiGroups: ["management.loft.sh"]
     resources: ["clusters"]
     verbs: ["get", "list", "watch"]
+  - apiGroups: ["management.loft.sh"]
+    resources: ["virtualclusterinstances"]
+    verbs: ["get", "list", "watch", "use"]
+  - apiGroups: ["management.loft.sh"]
+    resources: ["argocdapplications"]
+    verbs: ["get", "list", "watch", "create", "patch", "delete"]
+  # AccessKeys contain bearer credentials. This controller needs these verbs
+  # only for its labelled per-VCI writer and short-lived installer keys.
+  - apiGroups: ["storage.loft.sh"]
+    resources: ["accesskeys"]
+    verbs: ["get", "list", "create", "delete"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
@@ -41,9 +52,6 @@ metadata:
   labels:
     {{- include "fleet-bindings.labels" . | nindent 4 }}
 rules:
-  - apiGroups: ["management.loft.sh"]
-    resources: ["argocdapplications"]
-    verbs: ["get", "list", "watch", "create", "patch", "delete"]
   - apiGroups: ["fleet.lab.kurtmadel.com"]
     resources: ["fleetprofiles"]
     verbs: ["get", "list", "watch"]

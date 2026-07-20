@@ -12,8 +12,8 @@ Git is the source of truth; vCluster Platform is the distributor. This
 repository combines two delivery mechanisms:
 
 - The **vCP Fleet Binding Controller** watches registered `Cluster` metadata and
-  dynamically binds application profiles to the Platform management cluster and
-  connected control-plane clusters.
+  rendered `VirtualClusterInstance` shape, dynamically binding application
+  profiles to control-plane clusters and tenant clusters.
 - The **v2 Argo CD integration** delivers applications referenced by
   `VirtualClusterTemplate`s to tenant clusters (`target: vCluster`) or their
   control plane clusters (`target: host`).
@@ -103,6 +103,7 @@ vcluster-fleet-gitops/
     envoy-gateway-config.yaml     #   per-cluster (edge: GatewayClass/EnvoyProxy/Gateway)
     cert-config.yaml              #   per-cluster (edge TLS certs via cert-manager)
     external-dns.yaml             #   per-cluster (GoDaddy DNS records from base domain)
+    shared-node-tenant-collector.yaml # shared-node-safe tenant metrics collector
     vcluster-gitops-watcher.yaml  #   management-cluster-only
     charts/metallb-config/        #   wrapper: IPAddressPool from .Values.addressPool
     charts/envoy-gateway-config/  #   wrapper: edge from base domain + LB IP + platform host
@@ -131,6 +132,27 @@ The fleet has two complementary application-delivery paths:
 Both paths reuse `ArgoCDApplicationTemplate` resources. vCluster Platform is the
 distributor, and Git remains the source of truth for templates, profiles, and
 desired platform configuration.
+
+### Automatic observability for every VCI
+
+Tenant observability is a controller policy rather than a property repeated in
+every `VirtualClusterTemplate`. Once a VCI has rendered Helm values, the
+controller reads `status.virtualCluster.helmRelease.values` and selects one of
+two FleetProfiles:
+
+```text
+privateNodes.enabled=true  -> tenant-observability-private-nodes -> cluster-collector
+all other rendered VCIs    -> tenant-observability-shared-nodes  -> shared-node-tenant-collector
+```
+
+Platform injects `.Values.loft.project`, `.Values.loft.name`, and the remaining
+destination properties when it renders the generated application. The gateway
+derives trusted placement, shape, node-management, and hosting-cluster labels
+from the VCI. No template-specific tenant identity parameters are needed.
+
+Every enrolled VCI receives an exact-scope `metrics-writer` AccessKey. The
+controller delivers it directly to `observability/otel-otlp-auth` through the
+Platform VCI proxy; the token is not stored in Git or application parameters.
 
 The **fleet binding controller is the primary binding mechanism in this repo**.
 Git defines the available application templates, profiles, selectors, and
@@ -228,7 +250,7 @@ profile:
 | `fleet.lab.kurtmadel.com/profiles` | Comma-separated app profiles | `control-plane-baseline,gpu-nvidia-baseline` |
 | `fleet.lab.kurtmadel.com/extra-apps` | Extra templateRefs to bind | `custom-edge-config` |
 | `fleet.lab.kurtmadel.com/skip-apps` | Profile apps to omit | `metallb` |
-| `<template>.argocd-template-param.fleet.lab.kurtmadel.com/<parameter>` | Concrete parameter for one selected template | `fleet-observability-grafana.argocd-template-param.fleet.lab.kurtmadel.com/platformHost: vcp.lab.kurtmadel.com` |
+| `<template>.argocd-template-param.fleet.lab.kurtmadel.com/<parameter>` | Concrete parameter for one selected template | `example-dashboard.argocd-template-param.fleet.lab.kurtmadel.com/externalHost: dashboard.example.com` |
 
 Template and parameter names in the last convention are exact and
 case-sensitive. The extended DNS prefix leaves the annotation name's
@@ -355,7 +377,7 @@ The `Cluster` annotations are the fleet parameter sheet:
 | `fleet.lab.kurtmadel.com/dns-zone` | `external-dns` | `kurtmadel.com` |
 | `fleet.lab.kurtmadel.com/cluster-issuer` | `cert-config` | `letsencrypt-prod` |
 | `fleet.lab.kurtmadel.com/platform-hostname` | `envoy-gateway-config` (Platform management cluster only) | `vcp.lab.kurtmadel.com` |
-| `fleet-observability-grafana.argocd-template-param.fleet.lab.kurtmadel.com/platformHost` | Fleet Observability Grafana binding | `vcp.lab.kurtmadel.com` |
+| `<template>.argocd-template-param.fleet.lab.kurtmadel.com/<parameter>` | Selected template binding | `example-dashboard.../externalHost: dashboard.example.com` |
 
 The `gateway-lb-ip` must sit inside the cluster's `metallb-pool`, and the
 `cluster-issuer` must be a DNS01 issuer that can sign wildcards.
@@ -369,7 +391,6 @@ the built-in resources from [`bindings/values.yaml`](bindings/values.yaml):
 |---------|---------|
 | `control-plane-baseline` | Shared control-plane stack: cert-manager, metrics-server, MetalLB, Envoy Gateway, per-cluster edge/cert config, and external-dns (GoDaddy) |
 | `vcp-management-cluster-baseline` | The control-plane baseline plus `vcluster-gitops-watcher`; use this for the Platform management cluster |
-| `fleet-observability-platform` | Platform-side Prometheus, Grafana, and Cluster Collector bindings, with dependency ordering |
 | `gpu-nvidia-baseline` | Reserved NVIDIA GPU profile for `nvidia-gpu-operator` and `nvidia-dra-driver-gpu` |
 | `gpu-amd-baseline` | Reserved AMD GPU profile for `amd-gpu-operator` and `amd-dra-driver` |
 
@@ -485,7 +506,7 @@ that setting lets it adopt the old Helm-rendered bindings during migration.
    ```sh
    helm upgrade --install fleet-bindings \
      oci://ghcr.io/loft-demos/vcluster-fleet-gitops/fleet-bindings \
-     --version 0.4.1 \
+     --version 0.5.0 \
      --namespace vcluster-platform \
      --create-namespace \
      -f bindings/values.yaml

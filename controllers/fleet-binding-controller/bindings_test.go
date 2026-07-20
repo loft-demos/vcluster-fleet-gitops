@@ -2,6 +2,7 @@ package main
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -14,13 +15,34 @@ var testConfig = &Config{
 	ProfileAnnotation:   "fleet.lab.kurtmadel.com/profiles",
 	ExtraAppsAnnotation: "fleet.lab.kurtmadel.com/extra-apps",
 	SkipAppsAnnotation:  "fleet.lab.kurtmadel.com/skip-apps",
+	VCIObservability: VCIObservabilityConfig{
+		Enabled:                   true,
+		PrivateNodesProfile:       "tenant-observability-private-nodes",
+		SharedNodesProfile:        "tenant-observability-shared-nodes",
+		DisabledAnnotation:        "fleet.lab.kurtmadel.com/observability-disabled",
+		ProfileOverrideAnnotation: "fleet.lab.kurtmadel.com/observability-profile",
+	},
 }
 
 var testProfiles = indexFleetProfiles([]FleetProfile{
+	testProfile("tenant-observability-private-nodes", application("cluster-collector")),
+	testProfile("tenant-observability-shared-nodes", application("shared-node-tenant-collector")),
 	testProfile("control-plane-baseline", application("cert-manager"), application("metrics-server"), application("metallb")),
 	testProfile("vcp-management-cluster-baseline", application("cert-manager"), application("metrics-server"), application("vcluster-gitops-watcher")),
 	testProfile("gpu-nvidia-baseline", application("nvidia-gpu-operator"), application("nvidia-dra-driver-gpu")),
 })
+
+func testVirtualClusterInstance(namespace, name, values string, annotations map[string]string) VirtualClusterInstance {
+	instance := VirtualClusterInstance{
+		Metadata: ObjectMeta{Namespace: namespace, Name: name, Annotations: annotations},
+	}
+	if values != "" {
+		instance.Status.VirtualCluster = &VirtualClusterTemplateDefinition{
+			HelmRelease: VirtualClusterHelmRelease{Values: values},
+		}
+	}
+	return instance
+}
 
 func application(name string, dependencies ...string) FleetProfileApplication {
 	return FleetProfileApplication{Name: name, DependsOn: dependencies}
@@ -118,19 +140,19 @@ func TestExtraAndSkipAnnotationsAdjustApps(t *testing.T) {
 func TestTemplateParameterAnnotationsBecomeConcreteApplicationParameters(t *testing.T) {
 	profiles := indexFleetProfiles([]FleetProfile{
 		testProfile(
-			"fleet-observability-platform",
-			application("fleet-observability-prometheus"),
-			application("fleet-observability-grafana"),
+			"example-profile",
+			application("example-backend"),
+			application("example-dashboard"),
 		),
 	})
 	cluster := testCluster(
 		"loft-cluster",
 		map[string]string{"fleet.lab.kurtmadel.com/baseline": "true"},
 		map[string]string{
-			"fleet.lab.kurtmadel.com/profiles": "fleet-observability-platform",
-			"fleet-observability-grafana.argocd-template-param.fleet.lab.kurtmadel.com/platformHost":      "vcp.lab.kurtmadel.com",
-			"fleet-observability-grafana.argocd-template-param.fleet.lab.kurtmadel.com/grafanaAdminGroup": "platform-admins",
-			"unselected-template.argocd-template-param.fleet.lab.kurtmadel.com/ignored":                    "value",
+			"fleet.lab.kurtmadel.com/profiles":                                             "example-profile",
+			"example-dashboard.argocd-template-param.fleet.lab.kurtmadel.com/externalHost": "dashboard.example.com",
+			"example-dashboard.argocd-template-param.fleet.lab.kurtmadel.com/adminGroup":   "platform-admins",
+			"unselected-template.argocd-template-param.fleet.lab.kurtmadel.com/ignored":    "value",
 		},
 		true,
 	)
@@ -143,14 +165,14 @@ func TestTemplateParameterAnnotationsBecomeConcreteApplicationParameters(t *test
 		t.Fatalf("got %d bindings, want 2", len(bindings))
 	}
 	if bindings[0].Spec.Parameters != nil {
-		t.Fatalf("Prometheus parameters = %#v, want nil", bindings[0].Spec.Parameters)
+		t.Fatalf("backend parameters = %#v, want nil", bindings[0].Spec.Parameters)
 	}
 	want := map[string]interface{}{
-		"platformHost":      "vcp.lab.kurtmadel.com",
-		"grafanaAdminGroup": "platform-admins",
+		"externalHost": "dashboard.example.com",
+		"adminGroup":   "platform-admins",
 	}
 	if !reflect.DeepEqual(bindings[1].Spec.Parameters, want) {
-		t.Fatalf("Grafana parameters = %#v, want %#v", bindings[1].Spec.Parameters, want)
+		t.Fatalf("dashboard parameters = %#v, want %#v", bindings[1].Spec.Parameters, want)
 	}
 }
 
@@ -210,6 +232,96 @@ func TestClusterWithoutArgoCDSpecGetsNoBindings(t *testing.T) {
 	}
 	if len(bindings) != 0 {
 		t.Fatalf("expected no bindings when spec.argoCD is unset, got %v", bindings)
+	}
+}
+
+func TestVirtualClusterAutomaticallySelectsSharedNodesObservability(t *testing.T) {
+	instance := testVirtualClusterInstance("p-default", "shared-tenant", "privateNodes:\n  enabled: false\n", nil)
+	bindings, enrolled, ready, err := desiredBindingsForVirtualClusterInstance(instance, testConfig, testProfiles, nil)
+	if err != nil {
+		t.Fatalf("desired VCI bindings: %v", err)
+	}
+	if !enrolled || !ready {
+		t.Fatalf("enrolled=%v ready=%v, want true/true", enrolled, ready)
+	}
+	if got, want := templateNames(bindings), []string{"shared-node-tenant-collector"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("got %v, want %v", got, want)
+	}
+	if got := bindings[0].Metadata.Namespace; got != "p-default" {
+		t.Fatalf("namespace %q, want p-default", got)
+	}
+	destination := bindings[0].Spec.Destination
+	if destination.Cluster != nil || destination.VirtualCluster == nil ||
+		destination.VirtualCluster.Name != "shared-tenant" || destination.VirtualCluster.Target != "vCluster" {
+		t.Fatalf("unexpected destination: %#v", destination)
+	}
+}
+
+func TestVirtualClusterAutomaticallySelectsPrivateNodesObservability(t *testing.T) {
+	instance := testVirtualClusterInstance("p-team-a", "private-tenant", "privateNodes:\n  enabled: true\n  autoNodes:\n    - provider: demo\n", nil)
+	bindings, enrolled, ready, err := desiredBindingsForVirtualClusterInstance(instance, testConfig, testProfiles, nil)
+	if err != nil || !enrolled || !ready {
+		t.Fatalf("bindings failed: enrolled=%v ready=%v err=%v", enrolled, ready, err)
+	}
+	if got, want := templateNames(bindings), []string{"cluster-collector"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("got %v, want %v", got, want)
+	}
+	if bindings[0].Metadata.Name == bindingName("cluster-collector", "private-tenant") {
+		t.Fatalf("VCI binding name collides with Cluster binding: %s", bindings[0].Metadata.Name)
+	}
+}
+
+func TestVirtualClusterObservabilityOverrideAndAdditionalProfiles(t *testing.T) {
+	profiles := indexFleetProfiles([]FleetProfile{
+		testProfile("custom-observability", application("custom-collector")),
+		testProfile("tenant-addon", application("tenant-dashboard")),
+	})
+	instance := testVirtualClusterInstance("p-default", "tenant", "privateNodes:\n  enabled: false\n", map[string]string{
+		testConfig.VCIObservability.ProfileOverrideAnnotation: "custom-observability",
+		testConfig.ProfileAnnotation:                          "tenant-addon",
+	})
+	bindings, _, _, err := desiredBindingsForVirtualClusterInstance(instance, testConfig, profiles, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := templateNames(bindings), []string{"custom-collector", "tenant-dashboard"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("got %v, want %v", got, want)
+	}
+}
+
+func TestVirtualClusterCanOptOutAndWaitsForRenderedValues(t *testing.T) {
+	disabled := testVirtualClusterInstance("p-default", "disabled", "privateNodes:\n  enabled: false\n", map[string]string{
+		testConfig.VCIObservability.DisabledAnnotation: "true",
+	})
+	bindings, enrolled, ready, err := desiredBindingsForVirtualClusterInstance(disabled, testConfig, testProfiles, nil)
+	if err != nil || enrolled || ready || len(bindings) != 0 {
+		t.Fatalf("disabled VCI got bindings=%v enrolled=%v ready=%v err=%v", bindings, enrolled, ready, err)
+	}
+
+	pending := testVirtualClusterInstance("p-default", "pending", "", nil)
+	bindings, enrolled, ready, err = desiredBindingsForVirtualClusterInstance(pending, testConfig, testProfiles, nil)
+	if err != nil || !enrolled || ready || len(bindings) != 0 {
+		t.Fatalf("pending VCI got bindings=%v enrolled=%v ready=%v err=%v", bindings, enrolled, ready, err)
+	}
+}
+
+func TestRenderedVirtualClusterWithEmptyValuesIsSharedNodes(t *testing.T) {
+	instance := testVirtualClusterInstance("p-default", "empty-values", "placeholder", nil)
+	instance.Status.VirtualCluster.HelmRelease.Values = ""
+	bindings, enrolled, ready, err := desiredBindingsForVirtualClusterInstance(instance, testConfig, testProfiles, nil)
+	if err != nil || !enrolled || !ready {
+		t.Fatalf("enrolled=%v ready=%v err=%v", enrolled, ready, err)
+	}
+	if got, want := templateNames(bindings), []string{"shared-node-tenant-collector"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("got %v, want %v", got, want)
+	}
+}
+
+func TestLongVirtualClusterBindingNamesDoNotCollide(t *testing.T) {
+	a := virtualClusterBindingName("shared-node-tenant-collector", strings.Repeat("a", 70)+"x")
+	b := virtualClusterBindingName("shared-node-tenant-collector", strings.Repeat("a", 70)+"y")
+	if len(a) > 63 || len(b) > 63 || a == b {
+		t.Fatalf("VCI binding names are not collision safe: %q %q", a, b)
 	}
 }
 
@@ -342,7 +454,7 @@ func existingBinding(template, cluster, health, sync string) Application {
 			},
 		},
 		Spec: ApplicationSpec{
-			Destination: Destination{Cluster: ClusterRef{Name: cluster}},
+			Destination: Destination{Cluster: &ClusterRef{Name: cluster}},
 			TemplateRef: TemplateRef{Name: template},
 		},
 		Status: &ApplicationStatus{

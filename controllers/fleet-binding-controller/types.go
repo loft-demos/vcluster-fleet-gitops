@@ -11,6 +11,34 @@ type ClusterSpec struct {
 	ArgoCD ArgoCDSpec `json:"argoCD"`
 }
 
+// VirtualClusterInstance is the subset of the management.loft.sh/v1 resource
+// used to classify tenant observability and target generated applications.
+type VirtualClusterInstance struct {
+	Metadata ObjectMeta                   `json:"metadata"`
+	Spec     VirtualClusterInstanceSpec   `json:"spec"`
+	Status   VirtualClusterInstanceStatus `json:"status"`
+}
+
+type VirtualClusterInstanceSpec struct {
+	ClusterRef VirtualClusterClusterRef `json:"clusterRef"`
+}
+
+type VirtualClusterClusterRef struct {
+	Cluster string `json:"cluster,omitempty"`
+}
+
+type VirtualClusterInstanceStatus struct {
+	VirtualCluster *VirtualClusterTemplateDefinition `json:"virtualCluster,omitempty"`
+}
+
+type VirtualClusterTemplateDefinition struct {
+	HelmRelease VirtualClusterHelmRelease `json:"helmRelease,omitempty"`
+}
+
+type VirtualClusterHelmRelease struct {
+	Values string `json:"values,omitempty"`
+}
+
 // ArgoCDSpec gates whether a Cluster participates in fleet-binding-controller
 // reconciliation. Only clusters with argoCD.enabled: true are processed.
 type ArgoCDSpec struct {
@@ -48,11 +76,17 @@ type ApplicationSpec struct {
 }
 
 type Destination struct {
-	Cluster ClusterRef `json:"cluster"`
+	Cluster        *ClusterRef        `json:"cluster,omitempty"`
+	VirtualCluster *VirtualClusterRef `json:"virtualCluster,omitempty"`
 }
 
 type ClusterRef struct {
 	Name string `json:"name"`
+}
+
+type VirtualClusterRef struct {
+	Name   string `json:"name"`
+	Target string `json:"target"`
 }
 
 type TemplateRef struct {
@@ -99,4 +133,38 @@ type FleetProfileSpec struct {
 type FleetProfileApplication struct {
 	Name      string   `json:"name"`
 	DependsOn []string `json:"dependsOn,omitempty"`
+}
+
+// AccessKey is the subset of storage.loft.sh/v1 used for controller-managed
+// metrics writer and short-lived tenant installer credentials.
+type AccessKey struct {
+	APIVersion string        `json:"apiVersion,omitempty"`
+	Kind       string        `json:"kind,omitempty"`
+	Metadata   ObjectMeta    `json:"metadata"`
+	Spec       AccessKeySpec `json:"spec"`
+}
+
+type AccessKeySpec struct {
+	DisplayName string          `json:"displayName,omitempty"`
+	Type        string          `json:"type,omitempty"`
+	Key         string          `json:"key,omitempty"`
+	User        string          `json:"user,omitempty"`
+	Subject     string          `json:"subject,omitempty"`
+	Groups      []string        `json:"groups,omitempty"`
+	TTL         int64           `json:"ttl,omitempty"`
+	Scope       *AccessKeyScope `json:"scope,omitempty"`
+}
+
+type AccessKeyScope struct {
+	Roles           []AccessKeyScopeRole           `json:"roles,omitempty"`
+	VirtualClusters []AccessKeyScopeVirtualCluster `json:"virtualClusters,omitempty"`
+}
+
+type AccessKeyScopeRole struct {
+	Role string `json:"role"`
+}
+
+type AccessKeyScopeVirtualCluster struct {
+	Project        string `json:"project"`
+	VirtualCluster string `json:"virtualCluster"`
 }

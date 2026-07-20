@@ -31,7 +31,8 @@ spec:
         runAsGroup: 65532
       containers:
         - name: controller
-          image: "{{ .Values.controller.image.repository }}:{{ .Values.controller.image.tag }}{{ with .Values.controller.image.digest }}@{{ . }}{{ end }}"
+          {{- $imageTag := .Values.controller.image.tag | default .Chart.AppVersion }}
+          image: "{{ .Values.controller.image.repository }}:{{ $imageTag }}{{ with .Values.controller.image.digest }}@{{ . }}{{ end }}"
           imagePullPolicy: {{ .Values.controller.image.pullPolicy }}
           env:
             - name: PROJECT_NAMESPACE
@@ -46,6 +47,34 @@ spec:
               value: {{ .Values.controller.extraAppsAnnotation | quote }}
             - name: FLEET_BINDING_SKIP_APPS_ANNOTATION
               value: {{ .Values.controller.skipAppsAnnotation | quote }}
+            - name: FLEET_BINDING_VCI_OBSERVABILITY_ENABLED
+              value: {{ .Values.controller.virtualClusters.observabilityEnabled | quote }}
+            - name: FLEET_BINDING_VCI_PRIVATE_NODES_PROFILE
+              value: {{ .Values.controller.virtualClusters.privateNodesProfile | quote }}
+            - name: FLEET_BINDING_VCI_SHARED_NODES_PROFILE
+              value: {{ .Values.controller.virtualClusters.sharedNodesProfile | quote }}
+            - name: FLEET_BINDING_VCI_DISABLED_ANNOTATION
+              value: {{ .Values.controller.virtualClusters.disabledAnnotation | quote }}
+            - name: FLEET_BINDING_VCI_PROFILE_OVERRIDE_ANNOTATION
+              value: {{ .Values.controller.virtualClusters.profileOverrideAnnotation | quote }}
+            - name: FLEET_BINDING_WRITER_CREDENTIALS_ENABLED
+              value: {{ .Values.controller.writerCredentials.enabled | quote }}
+            - name: FLEET_BINDING_PLATFORM_URL
+              value: {{ .Values.controller.writerCredentials.platformURL | quote }}
+            - name: FLEET_BINDING_PLATFORM_INSECURE_SKIP_VERIFY
+              value: {{ .Values.controller.writerCredentials.insecureSkipVerify | quote }}
+            - name: FLEET_BINDING_WRITER_SECRET_NAMESPACE
+              value: {{ .Values.controller.writerCredentials.secretNamespace | quote }}
+            - name: FLEET_BINDING_WRITER_SECRET_NAME
+              value: {{ .Values.controller.writerCredentials.secretName | quote }}
+            - name: FLEET_BINDING_WRITER_SYNC_INTERVAL
+              value: {{ .Values.controller.writerCredentials.syncInterval | quote }}
+            - name: FLEET_BINDING_INSTALLER_USER
+              value: {{ .Values.controller.writerCredentials.installerUser | quote }}
+            {{- if .Values.controller.writerCredentials.platformCASecretName }}
+            - name: FLEET_BINDING_PLATFORM_CA_PATH
+              value: /platform-ca/ca.crt
+            {{- end }}
             - name: RECONCILE_INTERVAL
               value: {{ .Values.controller.reconcileInterval | quote }}
             - name: LOG_LEVEL
@@ -54,6 +83,11 @@ spec:
             - name: config
               mountPath: /config
               readOnly: true
+            {{- if .Values.controller.writerCredentials.platformCASecretName }}
+            - name: platform-ca
+              mountPath: /platform-ca
+              readOnly: true
+            {{- end }}
           resources:
             {{- toYaml .Values.controller.resources | nindent 12 }}
           securityContext:
@@ -65,6 +99,14 @@ spec:
         - name: config
           configMap:
             name: fleet-binding-controller-config
+        {{- if .Values.controller.writerCredentials.platformCASecretName }}
+        - name: platform-ca
+          secret:
+            secretName: {{ .Values.controller.writerCredentials.platformCASecretName }}
+            items:
+              - key: ca.crt
+                path: ca.crt
+        {{- end }}
       {{- with .Values.controller.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}

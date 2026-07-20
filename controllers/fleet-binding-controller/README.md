@@ -1,16 +1,48 @@
 # fleet-binding-controller
 
 Small in-cluster reconciler that turns selected vCluster Platform `Cluster`
-resources into `ArgoCDApplication` bindings.
+resources and rendered `VirtualClusterInstance` resources into
+`ArgoCDApplication` bindings.
 
 A `Cluster` is only processed when it both matches the configured cluster
 selector AND has `spec.argoCD.enabled: true`.
 
+When VCI observability is enabled, the controller lists VCIs across every
+Platform project. It waits for `status.virtualCluster.helmRelease.values`, then
+selects `tenant-observability-private-nodes` when
+`privateNodes.enabled: true`; all other rendered VCIs select
+`tenant-observability-shared-nodes`. The generated application lives in the
+VCI's project namespace and targets `destination.virtualCluster.target:
+vCluster`. No `VirtualClusterTemplate` change is required.
+
+Set `fleet.lab.kurtmadel.com/observability-disabled: "true"` on a VCI to opt
+out, or `fleet.lab.kurtmadel.com/observability-profile` to replace the automatic
+observability profile. The normal `profiles` annotation remains additive.
+
+## Per-VCI writer credentials
+
+With credential reconciliation enabled, the controller creates one
+`storage.loft.sh/v1 AccessKey` per enrolled VCI. Each key has only the
+`metrics-writer` role and one exact `scope.virtualClusters` entry. The token is
+written directly to `observability/otel-otlp-auth` through the Platform VCI
+proxy and never placed in Git or an `ArgoCDApplication` parameter.
+
+For each Secret operation, the controller creates a five-minute installer key
+scoped to the same VCI, uses it to call the tenant Kubernetes API, and deletes
+it immediately. `FLEET_BINDING_INSTALLER_USER` must be a Platform user that can
+use every enrolled VCI; the chart defaults to `admin`. This is privileged, so
+the chart grants the controller create/read/list/delete access to Platform
+`AccessKey` resources.
+
+The Secret is reconciled before the collector binding. Opting out deletes the
+Secret and writer key before pruning the binding. When a VCI itself is deleted,
+the controller removes the writer key and VCI teardown removes the Secret.
+
 Build and publish:
 
 ```sh
-docker build -t ghcr.io/loft-demos/vcluster-fleet-gitops/fleet-binding-controller:0.4.1 .
-docker push ghcr.io/loft-demos/vcluster-fleet-gitops/fleet-binding-controller:0.4.1
+docker build -t ghcr.io/loft-demos/vcluster-fleet-gitops/fleet-binding-controller:0.5.0 .
+docker push ghcr.io/loft-demos/vcluster-fleet-gitops/fleet-binding-controller:0.5.0
 ```
 
 Run unit tests:
@@ -19,9 +51,10 @@ Run unit tests:
 go test ./...
 ```
 
-The controller lists namespaced `FleetProfile` resources from the Platform
-project namespace. The cluster selector remains in the JSON file mounted by the
-`bindings` Helm chart.
+The controller lists central namespaced `FleetProfile` resources from the
+configured policy namespace. Cluster bindings use that namespace; VCI bindings
+use the VCI's own project namespace. The cluster selector remains in the JSON
+file mounted by the `bindings` Helm chart.
 
 An eligible `Cluster` can supply concrete parameters to a generated binding
 with this annotation convention:
@@ -33,11 +66,11 @@ with this annotation convention:
 For example:
 
 ```yaml
-fleet-observability-grafana.argocd-template-param.fleet.lab.kurtmadel.com/platformHost: vcp.lab.kurtmadel.com
+example-dashboard.argocd-template-param.fleet.lab.kurtmadel.com/externalHost: dashboard.example.com
 ```
 
 The controller places the resolved string under
-`ArgoCDApplication.spec.parameters.platformHost`. The template and parameter
+`ArgoCDApplication.spec.parameters.externalHost`. The template and parameter
 names are exact and case-sensitive. The long DNS prefix intentionally keeps the
 annotation's 63-character name segment available for the parameter name. Do
 not store secrets in these annotations.

@@ -1,4 +1,5 @@
-# The vCluster Platform project namespace the ArgoCDApplication objects live in.
+# Central policy namespace: FleetProfiles and Cluster-targeted applications live
+# here. VCI-targeted applications live in each VCI's own project namespace.
 projectNamespace: p-platform
 
 # Named app sets. A selected Cluster chooses one or more profiles with:
@@ -11,6 +12,19 @@ projectNamespace: p-platform
 # ArgoCDApplicationTemplates. dependsOn gates initial creation until every
 # prerequisite is both Healthy and Synced.
 profiles:
+  # Automatically selected for rendered VirtualClusterInstances with
+  # privateNodes.enabled: true.
+  tenant-observability-private-nodes:
+    applications:
+      - name: cluster-collector
+
+  # Automatically selected for rendered VirtualClusterInstances without
+  # private nodes. The referenced template is maintained by the environment
+  # and deliberately omits host-level collectors.
+  tenant-observability-shared-nodes:
+    applications:
+      - name: shared-node-tenant-collector
+
   control-plane-baseline:
     applications:
       - name: cert-manager
@@ -68,19 +82,6 @@ profiles:
           - envoy-gateway-config
       - name: vcluster-gitops-watcher
 
-  # Central Fleet Observability stack for the vCluster Platform management
-  # cluster. Required per-binding parameters stay on the destination Cluster
-  # using the controller's <template>.argocd-template-param... convention.
-  fleet-observability-platform:
-    applications:
-      - name: fleet-observability-prometheus
-      - name: fleet-observability-grafana
-        dependsOn:
-          - fleet-observability-prometheus
-      - name: cluster-collector
-        dependsOn:
-          - fleet-observability-prometheus
-
   # Reserved GPU profiles. Add the matching ArgoCDApplicationTemplates before
   # assigning these profiles to a Cluster.
   gpu-nvidia-baseline:
@@ -103,7 +104,9 @@ controller:
 
   image:
     repository: ghcr.io/loft-demos/vcluster-fleet-gitops/fleet-binding-controller
-    tag: "0.1.0"
+    # Empty uses Chart.yaml appVersion. Set this only to test or pin a
+    # controller version independently from the chart release.
+    tag: ""
     # Optional digest (sha256:...) to pin the image beyond the tag. Takes
     # precedence over the tag when set: image is "repository:tag@digest".
     digest: ""
@@ -123,6 +126,32 @@ controller:
   profileAnnotation: fleet.lab.kurtmadel.com/profiles
   extraAppsAnnotation: fleet.lab.kurtmadel.com/extra-apps
   skipAppsAnnotation: fleet.lab.kurtmadel.com/skip-apps
+
+  virtualClusters:
+    # Enroll every rendered VCI by default. Set the disabled annotation below
+    # to "true" on an individual instance to opt it out.
+    observabilityEnabled: true
+    privateNodesProfile: tenant-observability-private-nodes
+    sharedNodesProfile: tenant-observability-shared-nodes
+    disabledAnnotation: fleet.lab.kurtmadel.com/observability-disabled
+    profileOverrideAnnotation: fleet.lab.kurtmadel.com/observability-profile
+
+  writerCredentials:
+    # Creates one exact-scope metrics-writer AccessKey per VCI and reconciles
+    # it into the tenant Secret without exposing the token in an Application.
+    enabled: true
+    platformURL: https://vcp.lab.kurtmadel.com
+    insecureSkipVerify: false
+    # Optional Secret in controller.namespace containing ca.crt.
+    platformCASecretName: ""
+    secretNamespace: observability
+    secretName: otel-otlp-auth
+    # Recheck and self-heal the tenant Secret at this interval. A controller
+    # restart performs an immediate check regardless of this value.
+    syncInterval: 10m
+    # Used only by a five-minute, VCI-scoped installer key that is deleted
+    # immediately after the tenant Secret API operation.
+    installerUser: admin
 
   podAnnotations: {}
   nodeSelector: {}

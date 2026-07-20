@@ -1,10 +1,14 @@
 package main
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"regexp"
 	"strconv"
 	"strings"
+
+	"sigs.k8s.io/yaml"
 )
 
 const (
@@ -19,6 +23,8 @@ const (
 
 	generatedByLabel          = "fleet.lab.kurtmadel.com/generated-by"
 	clusterLabel              = "fleet.lab.kurtmadel.com/cluster"
+	virtualClusterLabel       = "fleet.lab.kurtmadel.com/virtual-cluster"
+	sourceKindLabel           = "fleet.lab.kurtmadel.com/source-kind"
 	templateLabel             = "fleet.lab.kurtmadel.com/template"
 	profilesAnnotation        = "fleet.lab.kurtmadel.com/profiles"
 	dependsOnAnnotation       = "fleet.lab.kurtmadel.com/depends-on"
@@ -68,6 +74,15 @@ func bindingName(appName, clusterName string) string {
 	return truncateDNSLabel(dnsLabel(appName + "-" + clusterName))
 }
 
+func virtualClusterBindingName(appName, virtualClusterName string) string {
+	name := dnsLabel(appName + "-vci-" + virtualClusterName)
+	if len(name) <= 63 {
+		return name
+	}
+	digest := sha256.Sum256([]byte(name))
+	return strings.TrimRight(name[:54], "-.") + "-" + hex.EncodeToString(digest[:4])
+}
+
 func labelValue(value string) string {
 	return truncateDNSLabel(dnsLabel(value))
 }
@@ -97,6 +112,15 @@ type resolvedApplication struct {
 	Name      string
 	DependsOn []string
 	Depth     int
+}
+
+type bindingTarget struct {
+	Name        string
+	Namespace   string
+	SourceKind  string
+	Destination Destination
+	BindingName func(string, string) string
+	Labels      map[string]string
 }
 
 func indexFleetProfiles(profiles []FleetProfile) map[string]FleetProfile {
@@ -281,6 +305,104 @@ func desiredBindingsForCluster(
 		profileNames = cfg.DefaultProfiles
 	}
 
+	return desiredBindings(bindingTarget{
+		Name:       clusterName,
+		Namespace:  cfg.ProjectNamespace,
+		SourceKind: "Cluster",
+		Destination: Destination{
+			Cluster: &ClusterRef{Name: clusterName},
+		},
+		BindingName: bindingName,
+		Labels: map[string]string{
+			clusterLabel: clusterName,
+		},
+	}, annotations, profileNames, cfg, profiles, existing)
+}
+
+type privateNodesHelmValues struct {
+	PrivateNodes struct {
+		Enabled bool `json:"enabled"`
+	} `json:"privateNodes"`
+}
+
+func virtualClusterPrivateNodes(instance VirtualClusterInstance) (bool, bool, error) {
+	if instance.Status.VirtualCluster == nil {
+		return false, false, nil
+	}
+	raw := strings.TrimSpace(instance.Status.VirtualCluster.HelmRelease.Values)
+	if raw == "" {
+		return false, true, nil
+	}
+	values := privateNodesHelmValues{}
+	if err := yaml.Unmarshal([]byte(raw), &values); err != nil {
+		return false, true, fmt.Errorf("parse rendered helm values: %w", err)
+	}
+	return values.PrivateNodes.Enabled, true, nil
+}
+
+func virtualClusterObservabilityDisabled(instance VirtualClusterInstance, cfg *Config) bool {
+	value := strings.TrimSpace(instance.Metadata.Annotations[cfg.VCIObservability.DisabledAnnotation])
+	disabled, err := strconv.ParseBool(value)
+	return err == nil && disabled
+}
+
+// desiredBindingsForVirtualClusterInstance automatically selects one of the
+// two tenant-observability profiles from the rendered VCI privateNodes shape.
+// Explicit profile annotations are additive; the observability-profile
+// annotation replaces only the automatically selected observability profile.
+func desiredBindingsForVirtualClusterInstance(
+	instance VirtualClusterInstance,
+	cfg *Config,
+	profiles map[string]FleetProfile,
+	existing map[string]Application,
+) ([]Application, bool, bool, error) {
+	if !cfg.VCIObservability.Enabled || instance.Metadata.Name == "" || virtualClusterObservabilityDisabled(instance, cfg) {
+		return nil, false, false, nil
+	}
+
+	privateNodes, rendered, err := virtualClusterPrivateNodes(instance)
+	if err != nil {
+		return nil, true, false, err
+	}
+	if !rendered {
+		return nil, true, false, nil
+	}
+
+	observabilityProfile := cfg.VCIObservability.SharedNodesProfile
+	if privateNodes {
+		observabilityProfile = cfg.VCIObservability.PrivateNodesProfile
+	}
+	if override := strings.TrimSpace(instance.Metadata.Annotations[cfg.VCIObservability.ProfileOverrideAnnotation]); override != "" {
+		observabilityProfile = override
+	}
+	profileNames := orderedUnique(append(
+		[]string{observabilityProfile},
+		parseCSV(instance.Metadata.Annotations[cfg.ProfileAnnotation])...,
+	))
+
+	bindings, err := desiredBindings(bindingTarget{
+		Name:       instance.Metadata.Name,
+		Namespace:  instance.Metadata.Namespace,
+		SourceKind: "VirtualClusterInstance",
+		Destination: Destination{
+			VirtualCluster: &VirtualClusterRef{Name: instance.Metadata.Name, Target: "vCluster"},
+		},
+		BindingName: virtualClusterBindingName,
+		Labels: map[string]string{
+			virtualClusterLabel: instance.Metadata.Name,
+		},
+	}, instance.Metadata.Annotations, profileNames, cfg, profiles, existing)
+	return bindings, true, true, err
+}
+
+func desiredBindings(
+	target bindingTarget,
+	annotations map[string]string,
+	profileNames []string,
+	cfg *Config,
+	profiles map[string]FleetProfile,
+	existing map[string]Application,
+) ([]Application, error) {
 	applications, err := resolveApplications(
 		profileNames,
 		profiles,
@@ -293,12 +415,12 @@ func desiredBindingsForCluster(
 
 	bindings := make([]Application, 0, len(applications))
 	for _, application := range applications {
-		name := bindingName(application.Name, clusterName)
+		name := target.BindingName(application.Name, target.Name)
 		_, alreadyExists := existing[name]
 		if !alreadyExists {
 			dependenciesReady := true
 			for _, dependency := range application.DependsOn {
-				dependencyBinding, ok := existing[bindingName(dependency, clusterName)]
+				dependencyBinding, ok := existing[target.BindingName(dependency, target.Name)]
 				if !ok || !applicationReady(dependencyBinding) {
 					dependenciesReady = false
 					break
@@ -306,8 +428,9 @@ func desiredBindingsForCluster(
 			}
 			if !dependenciesReady {
 				logDebug(
-					"cluster %s application %s is waiting for dependencies: %s",
-					clusterName,
+					"%s %s application %s is waiting for dependencies: %s",
+					target.SourceKind,
+					target.Name,
 					application.Name,
 					strings.Join(application.DependsOn, ","),
 				)
@@ -315,18 +438,22 @@ func desiredBindingsForCluster(
 			}
 		}
 
+		labels := map[string]string{
+			"app.kubernetes.io/managed-by": managedBy,
+			generatedByLabel:               managedBy,
+			sourceKindLabel:                labelValue(target.SourceKind),
+			templateLabel:                  labelValue(application.Name),
+		}
+		for key, value := range target.Labels {
+			labels[key] = labelValue(value)
+		}
 		bindings = append(bindings, Application{
 			APIVersion: apiGroup + "/" + apiVersion,
 			Kind:       "ArgoCDApplication",
 			Metadata: ApplicationMeta{
 				Name:      name,
-				Namespace: cfg.ProjectNamespace,
-				Labels: map[string]string{
-					"app.kubernetes.io/managed-by": managedBy,
-					generatedByLabel:               managedBy,
-					clusterLabel:                   labelValue(clusterName),
-					templateLabel:                  labelValue(application.Name),
-				},
+				Namespace: target.Namespace,
+				Labels:    labels,
 				Annotations: map[string]string{
 					profilesAnnotation:        strings.Join(profileNames, ","),
 					dependsOnAnnotation:       strings.Join(application.DependsOn, ","),
@@ -334,7 +461,7 @@ func desiredBindingsForCluster(
 				},
 			},
 			Spec: ApplicationSpec{
-				Destination: Destination{Cluster: ClusterRef{Name: clusterName}},
+				Destination: target.Destination,
 				TemplateRef: TemplateRef{Name: application.Name},
 				Parameters:  parametersForTemplate(annotations, application.Name),
 			},

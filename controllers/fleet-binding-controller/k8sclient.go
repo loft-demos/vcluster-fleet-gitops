@@ -115,6 +115,26 @@ func (c *KubeClient) ListClusters(ctx context.Context) ([]Cluster, error) {
 	return list.Items, nil
 }
 
+func (c *KubeClient) ListVirtualClusterInstances(ctx context.Context, namespace string) ([]VirtualClusterInstance, error) {
+	path := fmt.Sprintf("/apis/%s/%s/%s", apiGroup, apiVersion, virtualClustersResource)
+	if namespace != "" {
+		path = fmt.Sprintf(
+			"/apis/%s/%s/namespaces/%s/%s",
+			apiGroup,
+			apiVersion,
+			url.PathEscape(namespace),
+			virtualClustersResource,
+		)
+	}
+	var list struct {
+		Items []VirtualClusterInstance `json:"items"`
+	}
+	if err := c.request(ctx, http.MethodGet, path, nil, "", &list); err != nil {
+		return nil, err
+	}
+	return list.Items, nil
+}
+
 func (c *KubeClient) ListFleetProfiles(ctx context.Context, namespace string) ([]FleetProfile, error) {
 	path := fmt.Sprintf(
 		"/apis/%s/%s/namespaces/%s/%s",
@@ -133,7 +153,10 @@ func (c *KubeClient) ListFleetProfiles(ctx context.Context, namespace string) ([
 }
 
 func (c *KubeClient) ListArgoCDApplications(ctx context.Context, namespace string) ([]Application, error) {
-	path := fmt.Sprintf("/apis/%s/%s/namespaces/%s/%s", apiGroup, apiVersion, url.PathEscape(namespace), argoCDApplicationsResource)
+	path := fmt.Sprintf("/apis/%s/%s/%s", apiGroup, apiVersion, argoCDApplicationsResource)
+	if namespace != "" {
+		path = fmt.Sprintf("/apis/%s/%s/namespaces/%s/%s", apiGroup, apiVersion, url.PathEscape(namespace), argoCDApplicationsResource)
+	}
 	var list struct {
 		Items []Application `json:"items"`
 	}
@@ -159,7 +182,12 @@ func (c *KubeClient) PatchArgoCDApplication(ctx context.Context, namespace, name
 			Annotations map[string]string `json:"annotations"`
 		} `json:"metadata"`
 		Spec struct {
-			Destination Destination `json:"destination"`
+			Destination struct {
+				// No omitempty: merge-patching null explicitly clears the
+				// mutually-exclusive destination left by the other source kind.
+				Cluster        *ClusterRef        `json:"cluster"`
+				VirtualCluster *VirtualClusterRef `json:"virtualCluster"`
+			} `json:"destination"`
 			TemplateRef TemplateRef `json:"templateRef"`
 			// Parameters intentionally has no omitempty. A JSON null in this
 			// merge patch removes parameters when their Cluster annotations are
@@ -167,13 +195,60 @@ func (c *KubeClient) PatchArgoCDApplication(ctx context.Context, namespace, name
 			Parameters map[string]interface{} `json:"parameters"`
 		} `json:"spec"`
 	}{}
-	patch.Spec.Destination = application.Spec.Destination
+	patch.Spec.Destination.Cluster = application.Spec.Destination.Cluster
+	patch.Spec.Destination.VirtualCluster = application.Spec.Destination.VirtualCluster
 	patch.Spec.TemplateRef = application.Spec.TemplateRef
 	patch.Spec.Parameters = application.Spec.Parameters
 	patch.Metadata.Labels = application.Metadata.Labels
 	patch.Metadata.Annotations = application.Metadata.Annotations
 
 	return c.request(ctx, http.MethodPatch, path, patch, "application/merge-patch+json", nil)
+}
+
+const (
+	storageAPIGroup         = "storage.loft.sh"
+	storageAPIVersion       = "v1"
+	accessKeysResource      = "accesskeys"
+	virtualClustersResource = "virtualclusterinstances"
+)
+
+func (c *KubeClient) ListAccessKeys(ctx context.Context) ([]AccessKey, error) {
+	path := fmt.Sprintf("/apis/%s/%s/%s", storageAPIGroup, storageAPIVersion, accessKeysResource)
+	selector := generatedByLabel + "=" + managedBy + "," + credentialPurposeLabel + "=" + writerPurpose
+	path += "?labelSelector=" + url.QueryEscape(selector)
+	var list struct {
+		Items []AccessKey `json:"items"`
+	}
+	if err := c.request(ctx, http.MethodGet, path, nil, "", &list); err != nil {
+		return nil, err
+	}
+	return list.Items, nil
+}
+
+func (c *KubeClient) GetAccessKey(ctx context.Context, name string) (*AccessKey, error) {
+	path := fmt.Sprintf("/apis/%s/%s/%s/%s", storageAPIGroup, storageAPIVersion, accessKeysResource, url.PathEscape(name))
+	key := &AccessKey{}
+	if err := c.request(ctx, http.MethodGet, path, nil, "", key); err != nil {
+		return nil, err
+	}
+	if key.Metadata.Name == "" {
+		return nil, nil
+	}
+	return key, nil
+}
+
+func (c *KubeClient) CreateAccessKey(ctx context.Context, key AccessKey) error {
+	path := fmt.Sprintf("/apis/%s/%s/%s", storageAPIGroup, storageAPIVersion, accessKeysResource)
+	err := c.request(ctx, http.MethodPost, path, key, "application/json", nil)
+	if err != nil && key.Spec.Key != "" {
+		return fmt.Errorf("%s", strings.ReplaceAll(err.Error(), key.Spec.Key, "<redacted>"))
+	}
+	return err
+}
+
+func (c *KubeClient) DeleteAccessKey(ctx context.Context, name string) error {
+	path := fmt.Sprintf("/apis/%s/%s/%s/%s", storageAPIGroup, storageAPIVersion, accessKeysResource, url.PathEscape(name))
+	return c.request(ctx, http.MethodDelete, path, nil, "", nil)
 }
 
 func (c *KubeClient) DeleteArgoCDApplication(ctx context.Context, namespace, name string) error {

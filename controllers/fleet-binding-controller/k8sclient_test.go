@@ -74,6 +74,25 @@ func TestListFleetProfilesUsesProjectNamespace(t *testing.T) {
 	}
 }
 
+func TestListVirtualClusterInstancesCanBeClusterWide(t *testing.T) {
+	client := &KubeClient{
+		baseURL: "https://kubernetes.example",
+		httpClient: testHTTPClient(t, `{"items":[{"metadata":{"name":"tenant-a","namespace":"p-team-a"}}]}`, func(request *http.Request) {
+			wantPath := "/apis/management.loft.sh/v1/virtualclusterinstances"
+			if request.URL.Path != wantPath {
+				t.Errorf("path %q, want %q", request.URL.Path, wantPath)
+			}
+		}),
+	}
+	instances, err := client.ListVirtualClusterInstances(context.Background(), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(instances) != 1 || instances[0].Metadata.Namespace != "p-team-a" {
+		t.Fatalf("unexpected instances: %#v", instances)
+	}
+}
+
 func TestListArgoCDApplicationsReadsUnderlyingHealthAndSyncStatus(t *testing.T) {
 	responseBody := `{
 			"items": [{
@@ -151,6 +170,10 @@ func TestPatchArgoCDApplicationOmitsTypeMetadata(t *testing.T) {
 			if parameters != nil {
 				t.Errorf("parameters = %#v, want null to clear stale values", parameters)
 			}
+			destination := spec["destination"].(map[string]interface{})
+			if _, found := destination["virtualCluster"]; !found || destination["virtualCluster"] != nil {
+				t.Errorf("virtualCluster = %#v, want explicit null", destination["virtualCluster"])
+			}
 		}),
 	}
 
@@ -168,7 +191,7 @@ func TestPatchArgoCDApplicationOmitsTypeMetadata(t *testing.T) {
 			},
 		},
 		Spec: ApplicationSpec{
-			Destination: Destination{Cluster: ClusterRef{Name: "edge"}},
+			Destination: Destination{Cluster: &ClusterRef{Name: "edge"}},
 			TemplateRef: TemplateRef{Name: "external-dns"},
 		},
 		Status: &ApplicationStatus{},
