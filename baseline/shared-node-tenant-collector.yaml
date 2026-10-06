@@ -5,6 +5,10 @@ apiVersion: storage.loft.sh/v1
 kind: ArgoCDApplicationTemplate
 metadata:
   name: shared-node-tenant-collector
+  labels:
+    # Grants the template to tenants whose templates.allow.byLabels selects it;
+    # the collector ArgoCDApplication in a tenant project resolves it as the tenant.
+    demo.vcluster.com/shared: "true"
 spec:
   displayName: Fleet Observability - Shared Nodes Tenant Collector
   description: >-

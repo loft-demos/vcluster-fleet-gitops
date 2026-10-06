@@ -87,7 +87,11 @@ func reconcileOnce(ctx context.Context, client *KubeClient, cfg *Config) error {
 			protectVirtualClusterBindings(existing, protected, instance.Metadata.Namespace, instance.Metadata.Name)
 			continue
 		}
-		if cfg.WriterCredentials.Enabled {
+		if cfg.WriterCredentials.Enabled && virtualClusterInstanceSleeping(instance) {
+			// The tenant Secret survives sleep, and reaching it now would wake
+			// the tenant cluster. Sync on the first pass after it wakes instead.
+			logDebug("VirtualClusterInstance %s is sleeping; deferring writer Secret sync", instance.Metadata.Name)
+		} else if cfg.WriterCredentials.Enabled {
 			if err := reconcileWriterCredential(ctx, client, cfg, instance.Metadata.Namespace, instance.Metadata.Name); err != nil {
 				logError("VirtualClusterInstance %s writer credential reconciliation failed: %v; preserving its existing bindings", instance.Metadata.Name, err)
 				protectVirtualClusterBindings(existing, protected, instance.Metadata.Namespace, instance.Metadata.Name)

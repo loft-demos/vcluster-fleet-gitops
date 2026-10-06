@@ -23,7 +23,14 @@ const (
 	credentialPurposeLabel = "fleet.lab.kurtmadel.com/credential-purpose"
 	writerPurpose          = "metrics-writer"
 	installerPurpose       = "tenant-secret-installer"
-	metricsWriterGroup     = "loft:system:metrics-writers"
+
+	// sleepModeIgnoreActivityLabel makes vCluster Platform drop the key's
+	// requests from sleep mode: they neither reset a tenant cluster's
+	// inactivity timer nor wake it when it is asleep.
+	sleepModeIgnoreActivityLabel = "sleepmode.loft.sh/ignore-activity"
+	sleepingSinceAnnotation      = "sleepmode.loft.sh/sleeping-since"
+	virtualClusterPhaseSleeping  = "Sleeping"
+	metricsWriterGroup           = "loft:system:metrics-writers"
 )
 
 var writerSecretLastSync = map[string]time.Time{}
@@ -172,6 +179,9 @@ func createInstallerAccessKey(ctx context.Context, client *KubeClient, cfg *Conf
 				generatedByLabel:       managedBy,
 				virtualClusterLabel:    instance,
 				credentialPurposeLabel: installerPurpose,
+				// The Secret sync is housekeeping, not tenant activity: it must
+				// not keep the tenant cluster awake or wake it up.
+				sleepModeIgnoreActivityLabel: "true",
 			},
 		},
 		Spec: AccessKeySpec{
@@ -376,6 +386,19 @@ func withTenantInstaller(ctx context.Context, client *KubeClient, cfg *Config, p
 		return err
 	}
 	return action(tenant)
+}
+
+// virtualClusterInstanceSleeping reports whether vCluster Platform has put the
+// tenant cluster to sleep. Any request through the Platform proxy with a
+// regular user key would wake it.
+func virtualClusterInstanceSleeping(instance VirtualClusterInstance) bool {
+	if strings.TrimSpace(instance.Metadata.Annotations[sleepingSinceAnnotation]) != "" {
+		return true
+	}
+	if instance.Status.SleepModeConfig != nil && instance.Status.SleepModeConfig.Status.SleepingSince > 0 {
+		return true
+	}
+	return instance.Status.Phase == virtualClusterPhaseSleeping
 }
 
 func reconcileWriterCredential(ctx context.Context, client *KubeClient, cfg *Config, projectNamespace, instance string) error {

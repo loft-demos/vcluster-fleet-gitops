@@ -99,3 +99,59 @@ func TestCredentialNameAvoidsLongNameCollisions(t *testing.T) {
 		t.Fatalf("credential names are not safe: %q %q", a, b)
 	}
 }
+
+func TestVirtualClusterInstanceSleeping(t *testing.T) {
+	tests := map[string]struct {
+		instance VirtualClusterInstance
+		want     bool
+	}{
+		"awake": {
+			instance: VirtualClusterInstance{Status: VirtualClusterInstanceStatus{Phase: "Ready"}},
+		},
+		"sleeping-since annotation": {
+			instance: VirtualClusterInstance{Metadata: ObjectMeta{Annotations: map[string]string{sleepingSinceAnnotation: "1791291968"}}},
+			want:     true,
+		},
+		"sleep mode status": {
+			instance: VirtualClusterInstance{Status: VirtualClusterInstanceStatus{SleepModeConfig: &SleepModeConfig{Status: SleepModeConfigStatus{SleepingSince: 1791291968}}}},
+			want:     true,
+		},
+		"sleeping phase": {
+			instance: VirtualClusterInstance{Status: VirtualClusterInstanceStatus{Phase: "Sleeping"}},
+			want:     true,
+		},
+	}
+	for name, test := range tests {
+		if got := virtualClusterInstanceSleeping(test.instance); got != test.want {
+			t.Errorf("%s: got %v, want %v", name, got, test.want)
+		}
+	}
+}
+
+func TestInstallerAccessKeyIgnoresSleepModeActivity(t *testing.T) {
+	var created AccessKey
+	transport := roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		switch request.Method {
+		case http.MethodGet:
+			return httpTestResponse(http.StatusNotFound, `{"kind":"Status","code":404}`), nil
+		case http.MethodPost:
+			body, _ := io.ReadAll(request.Body)
+			if err := json.Unmarshal(body, &created); err != nil {
+				t.Fatalf("decode created AccessKey: %v", err)
+			}
+			return httpTestResponse(http.StatusCreated, string(body)), nil
+		}
+		t.Fatalf("unexpected %s %s", request.Method, request.URL.Path)
+		return nil, nil
+	})
+	client := &KubeClient{baseURL: "https://kubernetes.example", token: "test-token", httpClient: &http.Client{Transport: transport}}
+	cfg := &Config{}
+	cfg.WriterCredentials.InstallerUser = "admin"
+
+	if _, err := createInstallerAccessKey(context.Background(), client, cfg, "p-default", "stacks-demo"); err != nil {
+		t.Fatalf("create installer key: %v", err)
+	}
+	if created.Metadata.Labels[sleepModeIgnoreActivityLabel] != "true" {
+		t.Fatalf("installer key must carry %s=true, got labels %v", sleepModeIgnoreActivityLabel, created.Metadata.Labels)
+	}
+}

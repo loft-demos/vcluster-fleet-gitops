@@ -150,6 +150,9 @@ controller:
     platformCASecretName: ""
     secretNamespace: observability
     secretName: otel-otlp-auth
+    # The sync skips sleeping tenant clusters and runs on the first pass after
+    # they wake, and its installer key carries sleepmode.loft.sh/ignore-activity,
+    # so it never wakes a tenant cluster or keeps one awake.
     # Recheck and self-heal the tenant Secret at this interval. A controller
     # restart performs an immediate check regardless of this value.
     syncInterval: 10m

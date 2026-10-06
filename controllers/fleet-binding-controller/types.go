@@ -28,7 +28,19 @@ type VirtualClusterClusterRef struct {
 }
 
 type VirtualClusterInstanceStatus struct {
-	VirtualCluster *VirtualClusterTemplateDefinition `json:"virtualCluster,omitempty"`
+	Phase           string                            `json:"phase,omitempty"`
+	VirtualCluster  *VirtualClusterTemplateDefinition `json:"virtualCluster,omitempty"`
+	SleepModeConfig *SleepModeConfig                  `json:"sleepModeConfig,omitempty"`
+}
+
+// SleepModeConfig is the subset of the VirtualClusterInstance sleep mode
+// status used to tell whether the tenant cluster is asleep.
+type SleepModeConfig struct {
+	Status SleepModeConfigStatus `json:"status,omitempty"`
+}
+
+type SleepModeConfigStatus struct {
+	SleepingSince int64 `json:"sleepingSince,omitempty"`
 }
 
 type VirtualClusterTemplateDefinition struct {
