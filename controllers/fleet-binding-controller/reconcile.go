@@ -128,10 +128,16 @@ func reconcileOnce(ctx context.Context, client *KubeClient, cfg *Config) error {
 	for key, application := range desired {
 		name := application.Metadata.Name
 		applicationNamespace := application.Metadata.Namespace
-		if _, ok := existing[key]; ok {
-			if err := client.PatchArgoCDApplication(ctx, applicationNamespace, name, application); err != nil {
+		if current, ok := existing[key]; ok {
+			patch := newApplicationPatch(application)
+			if !applicationNeedsPatch(key, current, patch) {
+				continue
+			}
+			resourceVersion, err := client.PatchArgoCDApplication(ctx, applicationNamespace, name, patch)
+			if err != nil {
 				return err
 			}
+			rememberApplicationPatch(key, patch, resourceVersion)
 			logInfo("patched ArgoCDApplication %s/%s", applicationNamespace, name)
 		} else {
 			if err := client.CreateArgoCDApplication(ctx, applicationNamespace, application); err != nil {
@@ -147,6 +153,7 @@ func reconcileOnce(ctx context.Context, client *KubeClient, cfg *Config) error {
 		if err := client.DeleteArgoCDApplication(ctx, applicationNamespace, name); err != nil {
 			return err
 		}
+		forgetApplicationPatch(applicationKey(applicationNamespace, name))
 		logInfo("deleted stale ArgoCDApplication %s/%s", applicationNamespace, name)
 	}
 

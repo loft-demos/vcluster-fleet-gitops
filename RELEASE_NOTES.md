@@ -1,5 +1,18 @@
 # Release Notes
 
+## 0.6.2
+
+### Fixed: every ArgoCDApplication was patched on every reconcile pass
+
+`fleet-binding-controller` sent a merge patch to every ArgoCDApplication it manages on every reconcile pass, whether or not anything had changed, and logged `patched ArgoCDApplication ...` at INFO each time. With nine bindings that was about 36 API calls a minute. Each patch was a no-op on the API server, so nothing downstream changed, but the log hid the real changes.
+
+The controller now only patches an ArgoCDApplication when the patch would change it:
+
+- It applies the merge patch to the live object locally and compares the labels, annotations, and spec it manages. Status and labels or annotations it does not manage do not count as changes.
+- As a backstop for fields the API server defaults or normalizes, it does not resend a patch identical to the last one when the object's `resourceVersion` has not changed since.
+
+`patched ArgoCDApplication` log lines now only appear for real changes. No configuration changes are needed.
+
 ## 0.6.1
 
 ### Fixed: the writer Secret sync kept waking sleeping tenant clusters
@@ -24,5 +37,5 @@ This release changes two things:
 ### Upgrade notes
 
 - No configuration changes are needed.
-- The label requires vCluster Platform v4.12.0 or later. Earlier versions ignore it, but sleeping tenant clusters are still skipped.
+- The label requires vCluster Platform v4.10.6, v4.11.0, v4.12.0, or later. Earlier versions ignore it, but sleeping tenant clusters are still skipped.
 - When a sleeping tenant cluster opts out of observability, removing its Secret now fails while it is asleep and is retried on later passes, without waking it. The controller keeps its existing Applications until the removal succeeds.

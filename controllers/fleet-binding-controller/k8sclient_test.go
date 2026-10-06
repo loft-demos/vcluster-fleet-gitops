@@ -197,11 +197,11 @@ func TestPatchArgoCDApplicationOmitsTypeMetadata(t *testing.T) {
 		Status: &ApplicationStatus{},
 	}
 
-	if err := client.PatchArgoCDApplication(
+	if _, err := client.PatchArgoCDApplication(
 		context.Background(),
 		"p-platform",
 		"external-dns-edge",
-		application,
+		newApplicationPatch(application),
 	); err != nil {
 		t.Fatalf("patch ArgoCDApplication: %v", err)
 	}

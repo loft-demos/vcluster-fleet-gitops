@@ -4,8 +4,8 @@ description: >-
   Installs the fleet binding controller, which reconciles vCP ArgoCDApplication
   bindings from Cluster metadata and automatically classified tenant clusters.
 type: application
-version: 0.6.1
-appVersion: "0.6.1"
+version: 0.6.2
+appVersion: "0.6.2"
 keywords:
   - vcluster-platform
   - argocd

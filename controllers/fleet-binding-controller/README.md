@@ -41,8 +41,8 @@ the controller removes the writer key and VCI teardown removes the Secret.
 Build and publish:
 
 ```sh
-docker build -t ghcr.io/loft-demos/vcluster-fleet-gitops/fleet-binding-controller:0.6.1 .
-docker push ghcr.io/loft-demos/vcluster-fleet-gitops/fleet-binding-controller:0.6.1
+docker build -t ghcr.io/loft-demos/vcluster-fleet-gitops/fleet-binding-controller:0.6.2 .
+docker push ghcr.io/loft-demos/vcluster-fleet-gitops/fleet-binding-controller:0.6.2
 ```
 
 Run unit tests:

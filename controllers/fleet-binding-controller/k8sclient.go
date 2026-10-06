@@ -171,38 +171,50 @@ func (c *KubeClient) CreateArgoCDApplication(ctx context.Context, namespace stri
 	return c.request(ctx, http.MethodPost, path, application, "application/json", nil)
 }
 
-func (c *KubeClient) PatchArgoCDApplication(ctx context.Context, namespace, name string, application Application) error {
-	path := fmt.Sprintf("/apis/%s/%s/namespaces/%s/%s/%s", apiGroup, apiVersion, url.PathEscape(namespace), argoCDApplicationsResource, url.PathEscape(name))
-	// Do not include apiVersion or kind in a merge patch. Platform serves this
-	// resource through management.loft.sh/v1 but stores it as storage.loft.sh/v1;
-	// sending the served apiVersion in the patch body fails validation.
-	patch := struct {
-		Metadata struct {
-			Labels      map[string]string `json:"labels"`
-			Annotations map[string]string `json:"annotations"`
-		} `json:"metadata"`
-		Spec struct {
-			Destination struct {
-				// No omitempty: merge-patching null explicitly clears the
-				// mutually-exclusive destination left by the other source kind.
-				Cluster        *ClusterRef        `json:"cluster"`
-				VirtualCluster *VirtualClusterRef `json:"virtualCluster"`
-			} `json:"destination"`
-			TemplateRef TemplateRef `json:"templateRef"`
-			// Parameters intentionally has no omitempty. A JSON null in this
-			// merge patch removes parameters when their Cluster annotations are
-			// deleted instead of leaving stale per-binding overrides behind.
-			Parameters map[string]interface{} `json:"parameters"`
-		} `json:"spec"`
-	}{}
+// applicationPatch is the JSON merge patch the controller sends for an
+// existing ArgoCDApplication. It deliberately omits apiVersion and kind:
+// Platform serves this resource through management.loft.sh/v1 but stores it as
+// storage.loft.sh/v1, and sending the served apiVersion fails validation.
+type applicationPatch struct {
+	Metadata struct {
+		Labels      map[string]string `json:"labels"`
+		Annotations map[string]string `json:"annotations"`
+	} `json:"metadata"`
+	Spec struct {
+		Destination struct {
+			// No omitempty: merge-patching null explicitly clears the
+			// mutually-exclusive destination left by the other source kind.
+			Cluster        *ClusterRef        `json:"cluster"`
+			VirtualCluster *VirtualClusterRef `json:"virtualCluster"`
+		} `json:"destination"`
+		TemplateRef TemplateRef `json:"templateRef"`
+		// Parameters intentionally has no omitempty. A JSON null in this
+		// merge patch removes parameters when their Cluster annotations are
+		// deleted instead of leaving stale per-binding overrides behind.
+		Parameters map[string]interface{} `json:"parameters"`
+	} `json:"spec"`
+}
+
+func newApplicationPatch(application Application) applicationPatch {
+	var patch applicationPatch
 	patch.Spec.Destination.Cluster = application.Spec.Destination.Cluster
 	patch.Spec.Destination.VirtualCluster = application.Spec.Destination.VirtualCluster
 	patch.Spec.TemplateRef = application.Spec.TemplateRef
 	patch.Spec.Parameters = application.Spec.Parameters
 	patch.Metadata.Labels = application.Metadata.Labels
 	patch.Metadata.Annotations = application.Metadata.Annotations
+	return patch
+}
 
-	return c.request(ctx, http.MethodPatch, path, patch, "application/merge-patch+json", nil)
+// PatchArgoCDApplication sends the merge patch and returns the resulting
+// resourceVersion, which stays unchanged when the patch was a no-op.
+func (c *KubeClient) PatchArgoCDApplication(ctx context.Context, namespace, name string, patch applicationPatch) (string, error) {
+	path := fmt.Sprintf("/apis/%s/%s/namespaces/%s/%s/%s", apiGroup, apiVersion, url.PathEscape(namespace), argoCDApplicationsResource, url.PathEscape(name))
+	var updated Application
+	if err := c.request(ctx, http.MethodPatch, path, patch, "application/merge-patch+json", &updated); err != nil {
+		return "", err
+	}
+	return updated.Metadata.ResourceVersion, nil
 }
 
 const (
